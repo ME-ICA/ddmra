@@ -5,7 +5,7 @@ on motion (i.e., a mix of global and focal effects), while the rank for the
 slope (difference in smoothing curve at 100mm and 35mm) indexes distance
 dependence (i.e., focal effects).
 """
-import pickle
+import os.path as op
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
@@ -19,53 +19,27 @@ import ddmra
 sns.set_style('white')
 
 
-def get_fd(motion):
-    # assuming rotations in degrees
-    motion[:, :3] = motion[:, :3] * 50 * (np.pi/180.)
-    motion = np.vstack((np.array([[0, 0, 0, 0, 0, 0]]),
-                        np.diff(motion, axis=0)))
-    fd = np.sum(np.abs(motion), axis=1)
-    return fd
-
-
-def main():
-    # Constants
-    n_subjects = 40 # 31
-    fd_thresh = 0.2
-    window = 1000
-    v1, v2 = 35, 100  # distances to evaluate
-    data = datasets.fetch_adhd(n_subjects=n_subjects)
-    n_iters = 10000
-    n_lines = min((n_iters, 50))
+def main(imgs, fd_all, out_dir='.', n_iters=10000, fd_thresh=0.2):
     res_file = 'results.txt'
-
-    # Prepare data
-    imgs = []
-    fd_all = []
-    for i in range(n_subjects):
-        func = data.func[i]
-        imgs.append(nib.load(func))
-        conf = data.confounds[i]
-        df = pd.read_csv(conf, sep='\t')
-        motion = df[['motion-pitch', 'motion-roll', 'motion-yaw',
-                     'motion-x', 'motion-y', 'motion-z']].values
-        fd_all.append(get_fd(motion))
+    v1, v2 = 35, 100  # distances to evaluate
+    n_lines = min((n_iters, 50))
 
     # Run analyses
-    results = ddmra.run(imgs, fd_all, n_iters=n_iters, qc_thresh=fd_thresh)
-
-    # This fails due to object size
-    # with open('results.pkl', 'wb') as fo:
-    #     pickle.dump(results, fo)
+    ddmra.run(imgs, fd_all, out_dir=out_dir, n_iters=n_iters, qc_thresh=fd_thresh)
+    smc_sorted_dists = np.loadtxt(op.join(out_dir, 'smc_sorted_distances.txt'))
+    all_sorted_dists = np.loadtxt(op.join(out_dir, 'all_sorted_distances.txt'))
 
     # QC:RSFC analysis
     # Assess significance
-    intercept = ddmra.get_val(results['sorted_dists'], results['qcrsfc_smc'], v1)
-    slope = (ddmra.get_val(results['sorted_dists'], results['qcrsfc_smc'], v1) -
-             ddmra.get_val(results['sorted_dists'], results['qcrsfc_smc'], v2))
-    perm_intercepts = ddmra.get_val(results['sorted_dists'], results['qcrsfc_null'], v1)
-    perm_slopes = (ddmra.get_val(results['sorted_dists'], results['qcrsfc_null'], v1) -
-                   ddmra.get_val(results['sorted_dists'], results['qcrsfc_null'], v2))
+    qcrsfc_rs = np.loadtxt(op.join(out_dir, 'qcrsfc_analysis_values.txt'))
+    qcrsfc_smc = np.loadtxt(op.join(out_dir, 'qcrsfc_analysis_smoothing_curve.txt'))
+    perm_qcrsfc_smc = np.loadtxt(op.join(out_dir, 'qcrsfc_analysis_null_smoothing_curves.txt'))
+    intercept = ddmra.get_val(smc_sorted_dists, qcrsfc_smc, v1)
+    slope = (ddmra.get_val(smc_sorted_dists, qcrsfc_smc, v1) -
+             ddmra.get_val(smc_sorted_dists, qcrsfc_smc, v2))
+    perm_intercepts = ddmra.get_val(smc_sorted_dists, perm_qcrsfc_smc, v1)
+    perm_slopes = (ddmra.get_val(smc_sorted_dists, perm_qcrsfc_smc, v1) -
+                   ddmra.get_val(smc_sorted_dists, perm_qcrsfc_smc, v2))
 
     p_inter = ddmra.rank_p(intercept, perm_intercepts, tail='upper')
     p_slope = ddmra.rank_p(slope, perm_slopes, tail='upper')
@@ -76,13 +50,13 @@ def main():
 
     # Generate plot
     fig, ax = plt.subplots(figsize=(10, 14))
-    sns.regplot(results['sorted_dists'], results['qcrsfc_y'],
+    sns.regplot(all_sorted_dists, qcrsfc_rs,
                 ax=ax, scatter=True, fit_reg=False,
                 scatter_kws={'color': 'red', 's': 2., 'alpha': 1})
     ax.axhline(0, xmin=0, xmax=200, color='black', linewidth=3)
     for i in range(n_lines):
-        ax.plot(results['sorted_dists'], results['qcrsfc_null'][i, :], color='black')
-    ax.plot(results['sorted_dists'], results['qcrsfc_smc'], color='white')
+        ax.plot(smc_sorted_dists, perm_qcrsfc_smc[i, :], color='black')
+    ax.plot(smc_sorted_dists, qcrsfc_smc, color='white')
     ax.set_xlabel('Distance (mm)', fontsize=32)
     ax.set_ylabel('QC:RSFC r\n(QC = mean FD)', fontsize=32, labelpad=-30)
     ax.set_ylim(-0.5, 0.5)
@@ -97,16 +71,20 @@ def main():
                 horizontalalignment='right',
                 verticalalignment='bottom', fontsize=32)
     fig.tight_layout()
-    fig.savefig('sandbox/qcrsfc_analysis.png', dpi=400)
+    fig.savefig(op.join(out_dir, 'qcrsfc_analysis.png'), dpi=400)
+    del qcrsfc_rs, qcrsfc_smc, perm_qcrsfc_smc
 
     # High-low motion analysis
     # Assess significance
-    intercept = ddmra.get_val(results['sorted_dists'], results['hl_smc'], v1)
-    slope = (ddmra.get_val(results['sorted_dists'], results['hl_smc'], v1) -
-             ddmra.get_val(results['sorted_dists'], results['hl_smc'], v2))
-    perm_intercepts = ddmra.get_val(results['sorted_dists'], results['hl_null'], v1)
-    perm_slopes = (ddmra.get_val(results['sorted_dists'], results['hl_null'], v1) -
-                   ddmra.get_val(results['sorted_dists'], results['hl_null'], v2))
+    hl_corr_diff = np.loadtxt(op.join(out_dir, 'highlow_analysis_values.txt'))
+    hl_smc = np.loadtxt(op.join(out_dir, 'highlow_analysis_smoothing_curve.txt'))
+    perm_hl_smc = np.loadtxt(op.join(out_dir, 'highlow_analysis_null_smoothing_curves.txt'))
+    intercept = ddmra.get_val(smc_sorted_dists, hl_smc, v1)
+    slope = (ddmra.get_val(smc_sorted_dists, hl_smc, v1) -
+             ddmra.get_val(smc_sorted_dists, hl_smc, v2))
+    perm_intercepts = ddmra.get_val(smc_sorted_dists, perm_hl_smc, v1)
+    perm_slopes = (ddmra.get_val(smc_sorted_dists, perm_hl_smc, v1) -
+                   ddmra.get_val(smc_sorted_dists, perm_hl_smc, v2))
 
     p_inter = ddmra.rank_p(intercept, perm_intercepts, tail='upper')
     p_slope = ddmra.rank_p(slope, perm_slopes, tail='upper')
@@ -117,13 +95,13 @@ def main():
 
     # Generate plot
     fig, ax = plt.subplots(figsize=(10, 14))
-    sns.regplot(results['sorted_dists'], results['hl_y'],
+    sns.regplot(all_sorted_dists, hl_corr_diff,
                 ax=ax, scatter=True, fit_reg=False,
                 scatter_kws={'color': 'red', 's': 2, 'alpha': 1})
     ax.axhline(0, xmin=0, xmax=200, color='black', linewidth=3)
     for i in range(n_lines):
-        ax.plot(results['sorted_dists'], results['hl_null'][i, :], color='black')
-    ax.plot(results['sorted_dists'], results['hl_smc'], color='white')
+        ax.plot(smc_sorted_dists, perm_hl_smc[i, :], color='black')
+    ax.plot(smc_sorted_dists, hl_smc, color='white')
     ax.set_xlabel('Distance (mm)', fontsize=32)
     ax.set_ylabel(r'High-low motion $\Delta$r', fontsize=32)
     ax.set_ylim(-0.5, 0.5)
@@ -138,17 +116,22 @@ def main():
                 horizontalalignment='right',
                 verticalalignment='bottom', fontsize=32)
     fig.tight_layout()
-    fig.savefig('sandbox/hilow_analysis.png', dpi=400)
+    fig.savefig(op.join(out_dir, 'hilow_analysis.png'), dpi=400)
+    del hl_corr_diff, hl_smc, perm_hl_smc
 
     # Scrubbing analysis
-    # Assess significance
-    intercept = ddmra.get_val(results['sorted_dists'], results['scrub_smc'], v1)
-    slope = (ddmra.get_val(results['sorted_dists'], results['scrub_smc'], v1) -
-             ddmra.get_val(results['sorted_dists'], results['scrub_smc'], v2))
+    mean_delta_r = np.loadtxt(op.join(out_dir, 'scrubbing_analysis_values.txt'))
+    scrub_smc = np.loadtxt(op.join(out_dir, 'scrubbing_analysis_smoothing_curve.txt'))
+    perm_scrub_smc = np.loadtxt(op.join(out_dir, 'scrubbing_analysis_null_smoothing_curves.txt'))
 
-    perm_intercepts = ddmra.get_val(results['sorted_dists'], results['scrub_null'], v1)
-    perm_slopes = (ddmra.get_val(results['sorted_dists'], results['scrub_null'], v1) -
-                   ddmra.get_val(results['sorted_dists'], results['scrub_null'], v2))
+    # Assess significance
+    intercept = ddmra.get_val(smc_sorted_dists, scrub_smc, v1)
+    slope = (ddmra.get_val(smc_sorted_dists, scrub_smc, v1) -
+             ddmra.get_val(smc_sorted_dists, scrub_smc, v2))
+
+    perm_intercepts = ddmra.get_val(smc_sorted_dists, perm_scrub_smc, v1)
+    perm_slopes = (ddmra.get_val(smc_sorted_dists, perm_scrub_smc, v1) -
+                   ddmra.get_val(smc_sorted_dists, perm_scrub_smc, v2))
     p_inter = ddmra.rank_p(intercept, perm_intercepts, tail='upper')
     p_slope = ddmra.rank_p(slope, perm_slopes, tail='upper')
     with open(res_file, 'a') as fo:
@@ -158,14 +141,14 @@ def main():
 
     # Generate plot
     fig, ax = plt.subplots(figsize=(10, 14))
-    sns.regplot(results['sorted_dists'], results['scrub_y'],
+    sns.regplot(all_sorted_dists, mean_delta_r,
                 ax=ax, scatter=True, fit_reg=False,
                 scatter_kws={'color': 'red', 's': 2, 'alpha': 1})
     ax.axhline(0, xmin=0, xmax=200, color='black', linewidth=3)
     for i in range(n_lines):
-        ax.plot(results['sorted_dists'], results['scrub_null'][i, :],
+        ax.plot(smc_sorted_dists, perm_scrub_smc[i, :],
                 color='black')
-    ax.plot(results['sorted_dists'], results['scrub_smc'],
+    ax.plot(smc_sorted_dists, scrub_smc,
             color='white')
     ax.set_xlabel('Distance (mm)', fontsize=32)
     ax.set_ylabel(r'Scrubbing $\Delta$r', fontsize=32)
@@ -181,8 +164,27 @@ def main():
                 horizontalalignment='right',
                 verticalalignment='bottom', fontsize=32)
     fig.tight_layout()
-    fig.savefig('sandbox/scrubbing_analysis.png', dpi=400)
+    fig.savefig(op.join(out_dir, 'scrubbing_analysis.png'), dpi=400)
+    del mean_delta_r, scrub_smc, perm_scrub_smc
 
 
 if __name__ == '__main__':
-    main()
+    # Constants
+    n_subjects = 40  # 31
+    fd_thresh = 0.2
+    data = datasets.fetch_adhd(n_subjects=n_subjects)
+    n_iters = 10000
+
+    # Prepare data
+    imgs = []
+    fd_all = []
+    for i in range(n_subjects):
+        func = data.func[i]
+        imgs.append(nib.load(func))
+        conf = data.confounds[i]
+        df = pd.read_csv(conf, sep='\t')
+        motion = df[['motion-pitch', 'motion-roll', 'motion-yaw',
+                     'motion-x', 'motion-y', 'motion-z']].values
+        fd_all.append(ddmra.get_fd_power(
+            motion, order=['p', 'r', 'ya', 'x', 'y', 'z'], unit='rad'))
+    main(imgs, fd_all, n_iters=n_iters, fd_thresh=fd_thresh)
