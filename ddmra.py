@@ -1,7 +1,5 @@
 """
 Perform distance-dependent motion-related artifact analyses.
-
-TODO: Drop NaNs
 """
 import os.path as op
 import numpy as np
@@ -14,6 +12,21 @@ def get_val(x_arr, y_arr, x_val):
     """
     Perform interpolation to get value from y_arr at index of x_val based on
     x_arr.
+    TODO: Better documentation
+
+    Parameters
+    ----------
+    x_arr : (N,) numpy.ndarray
+
+    y_arr : ([X], N) numpy.ndarray
+
+    x_val : float
+        Position in x_arr for which to estimate value in y_arr.
+
+    Returns
+    -------
+    y_val : float or (X,) numpy.ndarray
+        Value in y_arr corresponding to position x_val in x_arr.
     """
     if y_arr.ndim == 2:
         y_arr = y_arr.T
@@ -45,15 +58,26 @@ def get_val(x_arr, y_arr, x_val):
 def rank_p(test_value, null_array, tail='two'):
     """
     Return rank-based p-value for test value against null array.
+
+    Parameters
+    ----------
+    test_value : float
+        Value for which to determine rank-based p-value.
+    null_array : 1D numpy.ndarray
+        Values to use as null distribution.
+    tail : {'two', 'upper', 'lower'}
+        Tail for computing p-value.
     """
     if tail == 'two':
-        p_value = (50 - np.abs(stats.percentileofscore(null_array, test_value) - 50.)) * 2. / 100.
+        p_value = (50 - np.abs(stats.percentileofscore(
+            null_array, test_value) - 50.)) * 2. / 100.
     elif tail == 'upper':
         p_value = 1 - (stats.percentileofscore(null_array, test_value) / 100.)
     elif tail == 'lower':
         p_value = stats.percentileofscore(null_array, test_value) / 100.
     else:
-        raise ValueError('Argument "tail" must be one of ["two", "upper", "lower"]')
+        raise ValueError('Argument "tail" must be one of ["two", "upper", '
+                         '"lower"]')
     return p_value
 
 
@@ -61,6 +85,18 @@ def fast_pearson(X, y):
     """
     Fast correlations between y and each row of X. For QC-RSFC. Checked for
     accuracy. From http://qr.ae/TU1B9C
+
+    Parameters
+    ----------
+    X : (i, j) numpy.ndarray
+        Matrix for which each row is correlated with y.
+    y : (j,) numpy.ndarray
+        Array with which to correlate each row of X.
+
+    Returns
+    -------
+    pearsons : (i,) numpy.ndarray
+        Row-wise correlations between X and y.
     """
     assert len(X.shape) == 2
     assert len(y.shape) == 1
@@ -80,7 +116,27 @@ def fast_pearson(X, y):
 def get_fd_power(motion, order=['x', 'y', 'z', 'r', 'p', 'ya'], unit='deg',
                  radius=50):
     """
-    Calculate Framewise Displacement (Power version).
+    Calculate Framewise Displacement (Power version). This is meant to be very
+    flexible, but is really only here for the test ADHD dataset.
+
+    Parameters
+    ----------
+    motion : (T, 6) numpy.ndarray
+        Translation and rotation motion parameters.
+    order : (6,) list
+        Order of the motion parameters in motion array. Some combination of
+        'x', 'y', 'z', 'r', 'p', and 'ya'. Default has translations then
+        rotations.
+    unit : {'deg', 'rad'}
+        Which unit the rotation parameters are in. 'deg' for degree (default in
+        SPM and AfNI), 'rad' for radian (default in FSL). Default is 'deg'.
+    radius : float or int
+        Radius of brain in millimeters. Default is 50, as used by Power.
+
+    Returns
+    -------
+    fd : (T,) numpy.ndarray
+        Framewise displacement values.
     """
     des_order = ['x', 'y', 'z', 'r', 'p', 'ya']
     reorder = [order.index(i) for i in des_order]
@@ -100,6 +156,21 @@ def get_fd_power(motion, order=['x', 'y', 'z', 'r', 'p', 'ya'], unit='deg',
 
 def moving_average(values, window):
     """Calculate running average along values array
+
+    Parameters
+    ----------
+    values : (N,) numpy.ndarray
+        Values over which to compute average.
+    window : int
+        Sliding window size over which to average values.
+
+    Returns
+    -------
+    sma : (N,) numpy.ndarray
+        Each value in sma is the average of the `window` values in values
+        surrounding that position. So sma[1000] (with a window of 500) will be
+        the mean of values[750:1250]. Positions at the beginning and end will
+        be NaNs.
     """
     weights = np.repeat(1.0, window) / window
     sma = np.convolve(values, weights, 'valid')
@@ -118,11 +189,28 @@ def scrubbing_analysis(group_timeseries, qcs, n_rois, qc_thresh=0.2, perm=True):
 
     Parameters
     ----------
-    group_timeseries : list
+    group_timeseries : (N,) list
         List of (R, T) arrays
-    qcs : list
+    qcs : (N,) list
         List of (T,) arrays
+    n_rois : int
+        Equal to R.
+    qc_thresh : float
+        Threshold to apply to QC values for identifying bad volumes.
+    perm : bool
+        Whether the call is part of the null distribution permutations or for
+        the real deal.
+
+    Returns
+    -------
+    mean_delta_r : numpy.ndarray
+        Average (across subjects) change in correlation coefficient from
+        unscrubbed to scrubbed timeseries for each pair of ROIs. Length of
+        array will be ((R * R) - R) / 2 (upper triangle of RxR correlation
+        matrix).
     """
+    # double check this but should replace argument
+    # n_rois = group_timeseries[0].shape[0]
     mat_idx = np.triu_indices(n_rois, k=1)
     n_pairs = len(mat_idx[0])
     n_subjects = len(group_timeseries)
@@ -158,11 +246,13 @@ def run(imgs, qcs, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000):
 
     Parameters
     ----------
-    imgs : list of img-like
+    imgs : (N,) list of img-like
         List of 4D (X x Y x Z x T) images in MNI space.
-    qcs : list of array-like
+    qcs : (N,) list of array-like
         List of 1D (T) numpy arrays with QC metric values per img (e.g., FD or
         respiration).
+    out_dir : str
+        Output directory.
     n_iters : int
         Number of iterations to run to generate null distributions.
     qc_thresh : float
@@ -172,19 +262,40 @@ def run(imgs, qcs, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000):
         Number of units (pairs of ROIs) to include when averaging to generate
         smoothing curve.
 
-    Returns
-    -------
-    results : dict
-        Dictionary of results arrays:
-        - all_sorted_dists: Sorted distances between ROIs
-        - keep_sorted_dists: Unique sorted distances
-        - [name]_y: Measure value for each pair of ROIs.
-            Same size and order as all_sorted_dists.
-        - [name]_smc: Smoothing curve for analysis. Same size as other
-            arrays, but contains NaNs for ROI pairs outside of window.
-            Same size and order as keep_sorted_dists.
-        - [name]_null: Null distribution smoothing curves. Contains NaNs for
-            ROI pairs outside of window. Same order as keep_sorted_dists.
+    Notes
+    -----
+    This function writes out several files to out_dir:
+    - all_sorted_distances.txt: Sorted distances between every pair of ROIs.
+    - smc_sorted_distances.txt: Sorted distances for smoothing curves. Does not
+        include duplicate distances or pairs of ROIs outside of smoothing curve
+        (first and last window/2 pairs).
+    - qcrsfc_analysis_values.txt: Results from QC:RSFC analysis. The QC:RSFC
+        value for each pair of ROIs, of the same size and in the same order as
+        all_sorted_distances.txt.
+    - qcrsfc_analysis_smoothing_curve.txt: Smoothing curve for QC:RSFC
+        analysis. Same size and order as smc_sorted_distances.txt.
+    - qcrsfc_analysis_null_smoothing_curves.txt: Null smoothing curves from
+        QC:RSFC analysis. Contains 2D array, where number of columns is same
+        size and order as smc_sorted_distances.txt and number of rows is number
+        of iterations for permutation analysis.
+    - highlow_analysis_values.txt: Results from high-low analysis. The delta r
+        value for each pair of ROIs, of the same size and in the same order as
+        all_sorted_distances.txt.
+    - highlow_analysis_smoothing_curve.txt: Smoothing curve for high-low
+        analysis. Same size and order as smc_sorted_distances.txt.
+    - highlow_analysis_null_smoothing_curves.txt: Null smoothing curves from
+        high-low analysis. Contains 2D array, where number of columns is same
+        size and order as smc_sorted_distances.txt and number of rows is number
+        of iterations for permutation analysis.
+    - scrubbing_analysis_values.txt: Results from scrubbing analysis. The
+        mean delta r value for each pair of ROIs, of the same size and in the
+        same order as all_sorted_distances.txt.
+    - scrubbing_analysis_smoothing_curve.txt: Smoothing curve for scrubbing
+        analysis. Same size and order as smc_sorted_distances.txt.
+    - scrubbing_analysis_null_smoothing_curves.txt: Null smoothing curves from
+        scrubbing analysis. Contains 2D array, where number of columns is same
+        size and order as smc_sorted_distances.txt and number of rows is number
+        of iterations for permutation analysis.
     """
     assert len(imgs) == len(qcs)
     n_subjects = len(imgs)
@@ -236,7 +347,8 @@ def run(imgs, qcs, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000):
     # Now back to the QC:RSFC analysis
     qcrsfc_smc = qcrsfc_smc[keep_idx]
     np.savetxt(op.join(out_dir, 'qcrsfc_analysis_values.txt'), qcrsfc_rs)
-    np.savetxt(op.join(out_dir, 'qcrsfc_analysis_smoothing_curve.txt'), qcrsfc_smc)
+    np.savetxt(op.join(out_dir, 'qcrsfc_analysis_smoothing_curve.txt'),
+               qcrsfc_smc)
     del qcrsfc_rs, qcrsfc_smc
 
     # High-low motion analysis
@@ -253,16 +365,19 @@ def run(imgs, qcs, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000):
     hl_smc = moving_average(hl_corr_diff, window)
     hl_smc = hl_smc[keep_idx]
     np.savetxt(op.join(out_dir, 'highlow_analysis_values.txt'), hl_corr_diff)
-    np.savetxt(op.join(out_dir, 'highlow_analysis_smoothing_curve.txt'), hl_smc)
+    np.savetxt(op.join(out_dir, 'highlow_analysis_smoothing_curve.txt'),
+               hl_smc)
     del hm_idx, lm_idx, hm_mean_corr, lm_mean_corr, hl_corr_diff, hl_smc
 
     # Scrubbing analysis
-    mean_delta_r = scrubbing_analysis(ts_all, qcs, n_rois, qc_thresh, perm=False)
+    mean_delta_r = scrubbing_analysis(ts_all, qcs, n_rois, qc_thresh,
+                                      perm=False)
     mean_delta_r = mean_delta_r[sort_idx]
     scrub_smc = moving_average(mean_delta_r, window)
     scrub_smc = scrub_smc[keep_idx]
     np.savetxt(op.join(out_dir, 'scrubbing_analysis_values.txt'), mean_delta_r)
-    np.savetxt(op.join(out_dir, 'scrubbing_analysis_smoothing_curve.txt'), scrub_smc)
+    np.savetxt(op.join(out_dir, 'scrubbing_analysis_smoothing_curve.txt'),
+               scrub_smc)
     del mean_delta_r, scrub_smc
 
     # Null distributions
@@ -277,7 +392,8 @@ def run(imgs, qcs, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000):
         # QC:RSFC analysis
         perm_qcrsfc_rs = fast_pearson(z_corr_mats.T, perm_mean_qcs)
         perm_qcrsfc_rs = perm_qcrsfc_rs[sort_idx]
-        perm_qcrsfc_smc[i, :] = moving_average(perm_qcrsfc_rs, window)[keep_idx]
+        perm_qcrsfc_smc[i, :] = moving_average(perm_qcrsfc_rs,
+                                               window)[keep_idx]
 
         # High-low analysis
         perm_hm_idx = perm_mean_qcs >= np.median(perm_mean_qcs)
@@ -293,8 +409,12 @@ def run(imgs, qcs, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000):
         perm_mean_delta_r = scrubbing_analysis(ts_all, perm_qcs, n_rois,
                                                qc_thresh, perm=True)
         perm_mean_delta_r = perm_mean_delta_r[sort_idx]
-        perm_scrub_smc[i, :] = moving_average(perm_mean_delta_r, window)[keep_idx]
+        perm_scrub_smc[i, :] = moving_average(perm_mean_delta_r,
+                                              window)[keep_idx]
 
-    np.savetxt(op.join(out_dir, 'qcrsfc_analysis_null_smoothing_curves.txt'), perm_qcrsfc_smc)
-    np.savetxt(op.join(out_dir, 'highlow_analysis_null_smoothing_curves.txt'), perm_hl_smc)
-    np.savetxt(op.join(out_dir, 'scrubbing_analysis_null_smoothing_curves.txt'), perm_scrub_smc)
+    np.savetxt(op.join(out_dir, 'qcrsfc_analysis_null_smoothing_curves.txt'),
+               perm_qcrsfc_smc)
+    np.savetxt(op.join(out_dir, 'highlow_analysis_null_smoothing_curves.txt'),
+               perm_hl_smc)
+    np.savetxt(op.join(out_dir, 'scrubbing_analysis_null_smoothing_curves.txt'),
+               perm_scrub_smc)
