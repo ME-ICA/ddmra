@@ -1,11 +1,18 @@
 """
 Perform distance-dependent motion-related artifact analyses.
 """
+import sys
+import logging
 import os.path as op
+
 import numpy as np
-from nilearn import input_data, datasets
+import nibabel as nib
 from scipy import stats
 from scipy.spatial.distance import pdist, squareform
+from nilearn import input_data, datasets
+
+sys.path.append('/home/data/nbc/data-analysis/')
+import earl_filter as ef
 
 
 def get_val(x_arr, y_arr, x_val):
@@ -179,7 +186,7 @@ def moving_average(values, window):
     return sma
 
 
-def scrubbing_analysis(group_timeseries, qcs, n_rois, qc_thresh=0.2, perm=True):
+def scrubbing_analysis(group_timeseries, fds_analysis, n_rois, qc_thresh=0.2, perm=True):
     """
     Perform Power scrubbing analysis. Note that correlations from scrubbed
     timeseries are subtracted from correlations from unscrubbed timeseries,
@@ -191,7 +198,7 @@ def scrubbing_analysis(group_timeseries, qcs, n_rois, qc_thresh=0.2, perm=True):
     ----------
     group_timeseries : (N,) list
         List of (R, T) arrays
-    qcs : (N,) list
+    fds_analysis : (N,) list
         List of (T,) arrays
     n_rois : int
         Equal to R.
@@ -218,7 +225,7 @@ def scrubbing_analysis(group_timeseries, qcs, n_rois, qc_thresh=0.2, perm=True):
     c = 0  # included subject counter
     for subj in range(n_subjects):
         ts_arr = group_timeseries[subj]
-        qc_arr = qcs[subj]
+        qc_arr = fds_analysis[subj]
         keep_idx = qc_arr <= qc_thresh
         # Subjects with no timepoints excluded or with more than 50% excluded
         # will be excluded from analysis.
@@ -240,15 +247,16 @@ def scrubbing_analysis(group_timeseries, qcs, n_rois, qc_thresh=0.2, perm=True):
     return mean_delta_r
 
 
-def run(imgs, qcs, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000):
+def run(files, motpars, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000,
+        earl=False, regress=False):
     """
     Run scrubbing, high-low motion, and QCRSFC analyses.
 
     Parameters
     ----------
-    imgs : (N,) list of img-like
+    files : (N,) list of nifti files
         List of 4D (X x Y x Z x T) images in MNI space.
-    qcs : (N,) list of array-like
+    fds_analysis : (N,) list of array-like
         List of 1D (T) numpy arrays with QC metric values per img (e.g., FD or
         respiration).
     out_dir : str
@@ -297,8 +305,22 @@ def run(imgs, qcs, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000):
         size and order as smc_sorted_distances.txt and number of rows is number
         of iterations for permutation analysis.
     """
-    assert len(imgs) == len(qcs)
-    n_subjects = len(imgs)
+    # create logger with 'spam_application'
+    logger = logging.getLogger('ddmra')
+    logger.setLevel(logging.DEBUG)
+    # create file handler which logs even debug messages
+    fh = logging.FileHandler(op.join(out_dir, 'log.tsv'))
+    fh.setLevel(logging.DEBUG)
+    # create formatter and add it to the handlers
+    formatter = logging.Formatter(
+        '%(asctime)s\t%(name)-12s\t%(levelname)-8s\t%(message)s')
+    fh.setFormatter(formatter)
+    # add the handlers to the logger
+    logger.addHandler(fh)
+
+    logger.info('Preallocating matrices')
+    assert len(files) == len(motpars)
+    n_subjects = len(files)
     atlas = datasets.fetch_coords_power_2011()
     coords = np.vstack((atlas.rois['x'], atlas.rois['y'], atlas.rois['z'])).T
     n_rois = coords.shape[0]
@@ -311,19 +333,38 @@ def run(imgs, qcs, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000):
     un_idx = np.array([np.where(all_sorted_dists == i)[0][0] for i in
                        np.unique(all_sorted_dists)])
 
-    t_r = imgs[0].header.get_zooms()[-1]
+    logger.info('Creating masker')
+    t_r = nib.load(files[0]).header.get_zooms()[-1]
     spheres_masker = input_data.NiftiSpheresMasker(
         seeds=coords, radius=5., t_r=t_r, smoothing_fwhm=4., detrend=False,
         standardize=False, low_pass=None, high_pass=None)
 
+    # if earl
+    motpars_analysis, fds_analysis = [], []
+    for motpars_ in motpars:
+        if earl:
+            logger.info('Filtering motion parameters')
+            motpars_filt, fd_filt = ef.filter_earl(motpars_, t_r)
+            motpars_analysis.append(motpars_filt)
+            fds_analysis.append(fd_filt)
+        else:
+            motpars_analysis.append(motpars_)
+            fds_analysis.append(ef.get_fd_power(motpars_, unit='rad'))
+
     # prep for qcrsfc and high-low motion analyses
-    mean_qcs = np.array([np.mean(qc) for qc in qcs])
+    mean_qcs = np.array([np.mean(qc) for qc in fds_analysis])
     raw_corr_mats = np.zeros((n_subjects, len(mat_idx[0])))
 
+    logger.info('Building correlation matrices')
     # Get correlation matrices
     ts_all = []
     for i_sub in range(n_subjects):
-        raw_ts = spheres_masker.fit_transform(imgs[i_sub]).T
+        img = nib.load(files[i_sub])
+        if regress:
+            raw_ts = spheres_masker.fit_transform(
+                img, confounds=motpars_analysis[i_sub]).T
+        else:
+            raw_ts = spheres_masker.fit_transform(img).T
         ts_all.append(raw_ts)
         raw_corrs = np.corrcoef(raw_ts)
         raw_corrs = raw_corrs[mat_idx]
@@ -335,6 +376,7 @@ def run(imgs, qcs, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000):
     # For each pair of ROIs, correlate the z-transformed correlation
     # coefficients across subjects with the subjects' mean QC (generally FD)
     # values.
+    logger.info('Performing QC:RSFC analysis')
     qcrsfc_rs = fast_pearson(z_corr_mats.T, mean_qcs)
     qcrsfc_rs = qcrsfc_rs[sort_idx]
     qcrsfc_smc = moving_average(qcrsfc_rs, window)
@@ -356,6 +398,7 @@ def run(imgs, qcs, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000):
     # FD). Then, for each pair of ROIs, calculate the difference between the
     # mean across correlation coefficients for the high motion minus the low
     # motion groups.
+    logger.info('Performing high-low motion analysis')
     hm_idx = mean_qcs >= np.median(mean_qcs)
     lm_idx = mean_qcs < np.median(mean_qcs)
     hm_mean_corr = np.mean(raw_corr_mats[hm_idx, :], axis=0)
@@ -370,7 +413,8 @@ def run(imgs, qcs, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000):
     del hm_idx, lm_idx, hm_mean_corr, lm_mean_corr, hl_corr_diff, hl_smc
 
     # Scrubbing analysis
-    mean_delta_r = scrubbing_analysis(ts_all, qcs, n_rois, qc_thresh,
+    logger.info('Performing scrubbing analysis')
+    mean_delta_r = scrubbing_analysis(ts_all, fds_analysis, n_rois, qc_thresh,
                                       perm=False)
     mean_delta_r = mean_delta_r[sort_idx]
     scrub_smc = moving_average(mean_delta_r, window)
@@ -381,7 +425,8 @@ def run(imgs, qcs, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000):
     del mean_delta_r, scrub_smc
 
     # Null distributions
-    qcs_copy = [qc.copy() for qc in qcs]
+    logger.info('Building null distributions with permutations')
+    qcs_copy = [qc.copy() for qc in fds_analysis]
     perm_scrub_smc = np.zeros((n_iters, len(keep_sorted_dists)))
     perm_qcrsfc_smc = np.zeros((n_iters, len(keep_sorted_dists)))
     perm_hl_smc = np.zeros((n_iters, len(keep_sorted_dists)))
@@ -418,3 +463,6 @@ def run(imgs, qcs, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000):
                perm_hl_smc)
     np.savetxt(op.join(out_dir, 'scrubbing_analysis_null_smoothing_curves.txt'),
                perm_scrub_smc)
+
+    logger.info('Workflow completed')
+    logger.shutdown()
