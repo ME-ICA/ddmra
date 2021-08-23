@@ -209,37 +209,16 @@ def run(
     Notes
     -----
     This function writes out several files to out_dir:
-    - all_sorted_distances.txt: Sorted distances between every pair of ROIs.
-    - smc_sorted_distances.txt: Sorted distances for smoothing curves. Does not
-        include duplicate distances or pairs of ROIs outside of smoothing curve
-        (first and last window/2 pairs).
-    - qcrsfc_analysis_values.txt: Results from QC:RSFC analysis. The QC:RSFC
-        value for each pair of ROIs, of the same size and in the same order as
-        all_sorted_distances.txt.
-    - qcrsfc_analysis_smoothing_curve.txt: Smoothing curve for QC:RSFC
-        analysis. Same size and order as smc_sorted_distances.txt.
-    - qcrsfc_analysis_null_smoothing_curves.txt: Null smoothing curves from
-        QC:RSFC analysis. Contains 2D array, where number of columns is same
-        size and order as smc_sorted_distances.txt and number of rows is number
-        of iterations for permutation analysis.
-    - highlow_analysis_values.txt: Results from high-low analysis. The delta r
-        value for each pair of ROIs, of the same size and in the same order as
-        all_sorted_distances.txt.
-    - highlow_analysis_smoothing_curve.txt: Smoothing curve for high-low
-        analysis. Same size and order as smc_sorted_distances.txt.
-    - highlow_analysis_null_smoothing_curves.txt: Null smoothing curves from
-        high-low analysis. Contains 2D array, where number of columns is same
-        size and order as smc_sorted_distances.txt and number of rows is number
-        of iterations for permutation analysis.
-    - scrubbing_analysis_values.txt: Results from scrubbing analysis. The
-        mean delta r value for each pair of ROIs, of the same size and in the
-        same order as all_sorted_distances.txt.
-    - scrubbing_analysis_smoothing_curve.txt: Smoothing curve for scrubbing
-        analysis. Same size and order as smc_sorted_distances.txt.
-    - scrubbing_analysis_null_smoothing_curves.txt: Null smoothing curves from
-        scrubbing analysis. Contains 2D array, where number of columns is same
-        size and order as smc_sorted_distances.txt and number of rows is number
-        of iterations for permutation analysis.
+    - ``analysis_values.tsv.gz``: Raw analysis values for analyses.
+        Has four columns: distance, qcrsfc, scrubbing, and high_low.
+    - ``smoothing_curves.tsv.gz``: Smoothing curve information for analyses.
+        Has four columns: distance, qcrsfc, scrubbing, and high_low.
+    - ``[analysis]_analysis_null_smoothing_curves.txt``:
+        Null smoothing curves from each analysis.
+        Contains 2D array, where number of columns is same
+        size and order as distance column in ``smoothing_curves.tsv.gz``
+        and number of rows is number of iterations for permutation analysis.
+    - ``[analysis]_analysis.png``: Figure for each analysis.
     """
     # create LGR with 'spam_application'
     LGR.setLevel(logging.DEBUG)
