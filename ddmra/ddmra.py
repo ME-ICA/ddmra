@@ -1,24 +1,20 @@
 """
 Perform distance-dependent motion-related artifact analyses.
 """
-import sys
 import logging
 import os.path as op
 
-import numpy as np
+import earl_filter as ef
 import nibabel as nib
+import numpy as np
+from nilearn import datasets, input_data
 from scipy import stats
 from scipy.spatial.distance import pdist, squareform
-from nilearn import input_data, datasets
-
-sys.path.append('/home/data/nbc/data-analysis/')
-import earl_filter as ef
 
 
 def get_val(x_arr, y_arr, x_val):
-    """
-    Perform interpolation to get value from y_arr at index of x_val based on
-    x_arr.
+    """Perform interpolation to get value from y_arr at index of x_val based on x_arr.
+
     TODO: Better documentation
 
     Parameters
@@ -55,16 +51,14 @@ def get_val(x_arr, y_arr, x_val):
             y_val = np.zeros(y_arr.shape[1])
             for i in range(y_val.shape[0]):
                 temp_y_arr = y_arr[:, i]
-                y_val[i] = np.interp(xp=x_arr[temp_idx],
-                                     fp=temp_y_arr[temp_idx], x=x_val)
+                y_val[i] = np.interp(xp=x_arr[temp_idx], fp=temp_y_arr[temp_idx], x=x_val)
         else:
             y_val = np.interp(xp=x_arr[temp_idx], fp=y_arr[temp_idx], x=x_val)
     return y_val
 
 
-def rank_p(test_value, null_array, tail='two'):
-    """
-    Return rank-based p-value for test value against null array.
+def rank_p(test_value, null_array, tail="two"):
+    """Return rank-based p-value for test value against null array.
 
     Parameters
     ----------
@@ -75,23 +69,23 @@ def rank_p(test_value, null_array, tail='two'):
     tail : {'two', 'upper', 'lower'}
         Tail for computing p-value.
     """
-    if tail == 'two':
-        p_value = (50 - np.abs(stats.percentileofscore(
-            null_array, test_value) - 50.)) * 2. / 100.
-    elif tail == 'upper':
-        p_value = 1 - (stats.percentileofscore(null_array, test_value) / 100.)
-    elif tail == 'lower':
-        p_value = stats.percentileofscore(null_array, test_value) / 100.
+    if tail == "two":
+        p_value = (
+            (50 - np.abs(stats.percentileofscore(null_array, test_value) - 50.0)) * 2.0 / 100.0
+        )
+    elif tail == "upper":
+        p_value = 1 - (stats.percentileofscore(null_array, test_value) / 100.0)
+    elif tail == "lower":
+        p_value = stats.percentileofscore(null_array, test_value) / 100.0
     else:
-        raise ValueError('Argument "tail" must be one of ["two", "upper", '
-                         '"lower"]')
+        raise ValueError('Argument "tail" must be one of ["two", "upper", ' '"lower"]')
     return p_value
 
 
 def fast_pearson(X, y):
-    """
-    Fast correlations between y and each row of X. For QC-RSFC. Checked for
-    accuracy. From http://qr.ae/TU1B9C
+    """Fast correlations between y and each row of X, for QC-RSFC.
+
+    Checked for accuracy. From http://qr.ae/TU1B9C
 
     Parameters
     ----------
@@ -120,11 +114,10 @@ def fast_pearson(X, y):
     return pearsons
 
 
-def get_fd_power(motion, order=['x', 'y', 'z', 'r', 'p', 'ya'], unit='deg',
-                 radius=50):
-    """
-    Calculate Framewise Displacement (Power version). This is meant to be very
-    flexible, but is really only here for the test ADHD dataset.
+def get_fd_power(motion, order=["x", "y", "z", "r", "p", "ya"], unit="deg", radius=50):
+    """Calculate Framewise Displacement (Power version).
+
+    This is meant to be very flexible, but is really only here for the test ADHD dataset.
 
     Parameters
     ----------
@@ -145,24 +138,23 @@ def get_fd_power(motion, order=['x', 'y', 'z', 'r', 'p', 'ya'], unit='deg',
     fd : (T,) numpy.ndarray
         Framewise displacement values.
     """
-    des_order = ['x', 'y', 'z', 'r', 'p', 'ya']
+    des_order = ["x", "y", "z", "r", "p", "ya"]
     reorder = [order.index(i) for i in des_order]
     motion_reordered = motion[:, reorder]
-    if unit == 'deg':
-        motion_reordered[:, 3:] = motion_reordered[:, 3:] * radius * (np.pi/180.)
-    elif unit == 'rad':
+    if unit == "deg":
+        motion_reordered[:, 3:] = motion_reordered[:, 3:] * radius * (np.pi / 180.0)
+    elif unit == "rad":
         motion_reordered[:, 3:] = motion_reordered[:, 3:] * radius
     else:
-        raise Exception('Rotation units must be degrees or radians.')
+        raise Exception("Rotation units must be degrees or radians.")
 
-    deriv = np.vstack((np.array([[0, 0, 0, 0, 0, 0]]),
-                       np.diff(motion_reordered, axis=0)))
+    deriv = np.vstack((np.array([[0, 0, 0, 0, 0, 0]]), np.diff(motion_reordered, axis=0)))
     fd = np.sum(np.abs(deriv), axis=1)
     return fd
 
 
 def moving_average(values, window):
-    """Calculate running average along values array
+    """Calculate running average along values array.
 
     Parameters
     ----------
@@ -180,15 +172,16 @@ def moving_average(values, window):
         be NaNs.
     """
     weights = np.repeat(1.0, window) / window
-    sma = np.convolve(values, weights, 'valid')
+    sma = np.convolve(values, weights, "valid")
     buff = np.zeros(int(window / 2)) * np.nan
     sma = np.hstack((buff, sma, buff))[:-1]
     return sma
 
 
 def scrubbing_analysis(group_timeseries, fds_analysis, n_rois, qc_thresh=0.2, perm=True):
-    """
-    Perform Power scrubbing analysis. Note that correlations from scrubbed
+    """Perform Power scrubbing analysis.
+
+    Note that correlations from scrubbed
     timeseries are subtracted from correlations from unscrubbed timeseries,
     which is the opposite to the original Power method. This reverses the
     signs of the results, but makes inference similar to that of the
@@ -230,7 +223,7 @@ def scrubbing_analysis(group_timeseries, fds_analysis, n_rois, qc_thresh=0.2, pe
         # Subjects with no timepoints excluded or with more than 50% excluded
         # will be excluded from analysis.
         prop_incl = np.sum(keep_idx) / qc_arr.shape[0]
-        if (prop_incl >= 0.5) and (prop_incl != 1.):
+        if (prop_incl >= 0.5) and (prop_incl != 1.0):
             scrubbed_ts = ts_arr[:, keep_idx]
             raw_corrs = np.corrcoef(ts_arr)
             raw_corrs = raw_corrs[mat_idx]
@@ -240,17 +233,23 @@ def scrubbing_analysis(group_timeseries, fds_analysis, n_rois, qc_thresh=0.2, pe
             c += 1
 
     if perm is False:
-        print('{0} of {1} subjects retained in scrubbing '
-              'analysis'.format(c, n_subjects))
+        print("{0} of {1} subjects retained in scrubbing " "analysis".format(c, n_subjects))
     delta_rs = delta_rs[:c, :]
     mean_delta_r = np.mean(delta_rs, axis=0)
     return mean_delta_r
 
 
-def run(files, motpars, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000,
-        earl=False, regress=False):
-    """
-    Run scrubbing, high-low motion, and QCRSFC analyses.
+def run(
+    files,
+    motpars,
+    out_dir=".",
+    n_iters=10000,
+    qc_thresh=0.2,
+    window=1000,
+    earl=False,
+    regress=False,
+):
+    """Run scrubbing, high-low motion, and QCRSFC analyses.
 
     Parameters
     ----------
@@ -306,63 +305,67 @@ def run(files, motpars, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000,
         of iterations for permutation analysis.
     """
     # create logger with 'spam_application'
-    logger = logging.getLogger('ddmra')
+    logger = logging.getLogger("ddmra")
     logger.setLevel(logging.DEBUG)
     # create file handler which logs even debug messages
-    fh = logging.FileHandler(op.join(out_dir, 'log.tsv'))
+    fh = logging.FileHandler(op.join(out_dir, "log.tsv"))
     fh.setLevel(logging.DEBUG)
     # create formatter and add it to the handlers
-    formatter = logging.Formatter(
-        '%(asctime)s\t%(name)-12s\t%(levelname)-8s\t%(message)s')
+    formatter = logging.Formatter("%(asctime)s\t%(name)-12s\t%(levelname)-8s\t%(message)s")
     fh.setFormatter(formatter)
     # add the handlers to the logger
     logger.addHandler(fh)
 
-    logger.info('Preallocating matrices')
+    logger.info("Preallocating matrices")
     assert len(files) == len(motpars)
     n_subjects = len(files)
     atlas = datasets.fetch_coords_power_2011()
-    coords = np.vstack((atlas.rois['x'], atlas.rois['y'], atlas.rois['z'])).T
+    coords = np.vstack((atlas.rois["x"], atlas.rois["y"], atlas.rois["z"])).T
     n_rois = coords.shape[0]
     mat_idx = np.triu_indices(n_rois, k=1)
     dists = squareform(pdist(coords))
     dists = dists[mat_idx]
     sort_idx = dists.argsort()
     all_sorted_dists = dists[sort_idx]
-    np.savetxt(op.join(out_dir, 'all_sorted_distances.txt'), all_sorted_dists)
-    un_idx = np.array([np.where(all_sorted_dists == i)[0][0] for i in
-                       np.unique(all_sorted_dists)])
+    np.savetxt(op.join(out_dir, "all_sorted_distances.txt"), all_sorted_dists)
+    un_idx = np.array([np.where(all_sorted_dists == i)[0][0] for i in np.unique(all_sorted_dists)])
 
-    logger.info('Creating masker')
+    logger.info("Creating masker")
     t_r = nib.load(files[0]).header.get_zooms()[-1]
     spheres_masker = input_data.NiftiSpheresMasker(
-        seeds=coords, radius=5., t_r=t_r, smoothing_fwhm=4., detrend=False,
-        standardize=False, low_pass=None, high_pass=None)
+        seeds=coords,
+        radius=5.0,
+        t_r=t_r,
+        smoothing_fwhm=4.0,
+        detrend=False,
+        standardize=False,
+        low_pass=None,
+        high_pass=None,
+    )
 
     # if earl
     motpars_analysis, fds_analysis = [], []
     for motpars_ in motpars:
         if earl:
-            logger.info('Filtering motion parameters')
+            logger.info("Filtering motion parameters")
             motpars_filt, fd_filt = ef.filter_earl(motpars_, t_r)
             motpars_analysis.append(motpars_filt)
             fds_analysis.append(fd_filt)
         else:
             motpars_analysis.append(motpars_)
-            fds_analysis.append(ef.get_fd_power(motpars_, unit='rad'))
+            fds_analysis.append(ef.get_fd_power(motpars_, unit="rad"))
 
     # prep for qcrsfc and high-low motion analyses
     mean_qcs = np.array([np.mean(qc) for qc in fds_analysis])
     raw_corr_mats = np.zeros((n_subjects, len(mat_idx[0])))
 
-    logger.info('Building correlation matrices')
+    logger.info("Building correlation matrices")
     # Get correlation matrices
     ts_all = []
     for i_sub in range(n_subjects):
         img = nib.load(files[i_sub])
         if regress:
-            raw_ts = spheres_masker.fit_transform(
-                img, confounds=motpars_analysis[i_sub]).T
+            raw_ts = spheres_masker.fit_transform(img, confounds=motpars_analysis[i_sub]).T
         else:
             raw_ts = spheres_masker.fit_transform(img).T
         ts_all.append(raw_ts)
@@ -376,7 +379,7 @@ def run(files, motpars, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000,
     # For each pair of ROIs, correlate the z-transformed correlation
     # coefficients across subjects with the subjects' mean QC (generally FD)
     # values.
-    logger.info('Performing QC:RSFC analysis')
+    logger.info("Performing QC:RSFC analysis")
     qcrsfc_rs = fast_pearson(z_corr_mats.T, mean_qcs)
     qcrsfc_rs = qcrsfc_rs[sort_idx]
     qcrsfc_smc = moving_average(qcrsfc_rs, window)
@@ -384,13 +387,12 @@ def run(files, motpars, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000,
     # Quick interlude to help reduce arrays
     keep_idx = np.intersect1d(np.where(~np.isnan(qcrsfc_smc))[0], un_idx)
     keep_sorted_dists = all_sorted_dists[keep_idx]
-    np.savetxt(op.join(out_dir, 'smc_sorted_distances.txt'), keep_sorted_dists)
+    np.savetxt(op.join(out_dir, "smc_sorted_distances.txt"), keep_sorted_dists)
 
     # Now back to the QC:RSFC analysis
     qcrsfc_smc = qcrsfc_smc[keep_idx]
-    np.savetxt(op.join(out_dir, 'qcrsfc_analysis_values.txt'), qcrsfc_rs)
-    np.savetxt(op.join(out_dir, 'qcrsfc_analysis_smoothing_curve.txt'),
-               qcrsfc_smc)
+    np.savetxt(op.join(out_dir, "qcrsfc_analysis_values.txt"), qcrsfc_rs)
+    np.savetxt(op.join(out_dir, "qcrsfc_analysis_smoothing_curve.txt"), qcrsfc_smc)
     del qcrsfc_rs, qcrsfc_smc
 
     # High-low motion analysis
@@ -398,7 +400,7 @@ def run(files, motpars, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000,
     # FD). Then, for each pair of ROIs, calculate the difference between the
     # mean across correlation coefficients for the high motion minus the low
     # motion groups.
-    logger.info('Performing high-low motion analysis')
+    logger.info("Performing high-low motion analysis")
     hm_idx = mean_qcs >= np.median(mean_qcs)
     lm_idx = mean_qcs < np.median(mean_qcs)
     hm_mean_corr = np.mean(raw_corr_mats[hm_idx, :], axis=0)
@@ -407,25 +409,22 @@ def run(files, motpars, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000,
     hl_corr_diff = hl_corr_diff[sort_idx]
     hl_smc = moving_average(hl_corr_diff, window)
     hl_smc = hl_smc[keep_idx]
-    np.savetxt(op.join(out_dir, 'highlow_analysis_values.txt'), hl_corr_diff)
-    np.savetxt(op.join(out_dir, 'highlow_analysis_smoothing_curve.txt'),
-               hl_smc)
+    np.savetxt(op.join(out_dir, "highlow_analysis_values.txt"), hl_corr_diff)
+    np.savetxt(op.join(out_dir, "highlow_analysis_smoothing_curve.txt"), hl_smc)
     del hm_idx, lm_idx, hm_mean_corr, lm_mean_corr, hl_corr_diff, hl_smc
 
     # Scrubbing analysis
-    logger.info('Performing scrubbing analysis')
-    mean_delta_r = scrubbing_analysis(ts_all, fds_analysis, n_rois, qc_thresh,
-                                      perm=False)
+    logger.info("Performing scrubbing analysis")
+    mean_delta_r = scrubbing_analysis(ts_all, fds_analysis, n_rois, qc_thresh, perm=False)
     mean_delta_r = mean_delta_r[sort_idx]
     scrub_smc = moving_average(mean_delta_r, window)
     scrub_smc = scrub_smc[keep_idx]
-    np.savetxt(op.join(out_dir, 'scrubbing_analysis_values.txt'), mean_delta_r)
-    np.savetxt(op.join(out_dir, 'scrubbing_analysis_smoothing_curve.txt'),
-               scrub_smc)
+    np.savetxt(op.join(out_dir, "scrubbing_analysis_values.txt"), mean_delta_r)
+    np.savetxt(op.join(out_dir, "scrubbing_analysis_smoothing_curve.txt"), scrub_smc)
     del mean_delta_r, scrub_smc
 
     # Null distributions
-    logger.info('Building null distributions with permutations')
+    logger.info("Building null distributions with permutations")
     qcs_copy = [qc.copy() for qc in fds_analysis]
     perm_scrub_smc = np.zeros((n_iters, len(keep_sorted_dists)))
     perm_qcrsfc_smc = np.zeros((n_iters, len(keep_sorted_dists)))
@@ -437,8 +436,7 @@ def run(files, motpars, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000,
         # QC:RSFC analysis
         perm_qcrsfc_rs = fast_pearson(z_corr_mats.T, perm_mean_qcs)
         perm_qcrsfc_rs = perm_qcrsfc_rs[sort_idx]
-        perm_qcrsfc_smc[i, :] = moving_average(perm_qcrsfc_rs,
-                                               window)[keep_idx]
+        perm_qcrsfc_smc[i, :] = moving_average(perm_qcrsfc_rs, window)[keep_idx]
 
         # High-low analysis
         perm_hm_idx = perm_mean_qcs >= np.median(perm_mean_qcs)
@@ -451,18 +449,13 @@ def run(files, motpars, out_dir='.', n_iters=10000, qc_thresh=0.2, window=1000,
 
         # Scrubbing analysis
         perm_qcs = [np.random.permutation(perm_qc) for perm_qc in qcs_copy]
-        perm_mean_delta_r = scrubbing_analysis(ts_all, perm_qcs, n_rois,
-                                               qc_thresh, perm=True)
+        perm_mean_delta_r = scrubbing_analysis(ts_all, perm_qcs, n_rois, qc_thresh, perm=True)
         perm_mean_delta_r = perm_mean_delta_r[sort_idx]
-        perm_scrub_smc[i, :] = moving_average(perm_mean_delta_r,
-                                              window)[keep_idx]
+        perm_scrub_smc[i, :] = moving_average(perm_mean_delta_r, window)[keep_idx]
 
-    np.savetxt(op.join(out_dir, 'qcrsfc_analysis_null_smoothing_curves.txt'),
-               perm_qcrsfc_smc)
-    np.savetxt(op.join(out_dir, 'highlow_analysis_null_smoothing_curves.txt'),
-               perm_hl_smc)
-    np.savetxt(op.join(out_dir, 'scrubbing_analysis_null_smoothing_curves.txt'),
-               perm_scrub_smc)
+    np.savetxt(op.join(out_dir, "qcrsfc_analysis_null_smoothing_curves.txt"), perm_qcrsfc_smc)
+    np.savetxt(op.join(out_dir, "highlow_analysis_null_smoothing_curves.txt"), perm_hl_smc)
+    np.savetxt(op.join(out_dir, "scrubbing_analysis_null_smoothing_curves.txt"), perm_scrub_smc)
 
-    logger.info('Workflow completed')
+    logger.info("Workflow completed")
     logger.shutdown()

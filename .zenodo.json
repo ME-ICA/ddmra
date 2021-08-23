@@ -1,0 +1,15 @@
+{
+    "creators": [
+        {
+            "name": "Salo, Taylor",
+            "affiliation": "Florida International University",
+            "orcid": "0000-0001-9813-3167"
+        }
+    ],
+    "keywords": [
+        "neuroimaging",
+        "fMRI"
+    ],
+    "license": "Apache 2.0",
+    "upload_type": "software"
+}
