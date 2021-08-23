@@ -13,7 +13,7 @@ from .utils import fast_pearson, moving_average
 LGR = logging.getLogger("ddmra")
 
 
-def scrubbing_analysis(group_timeseries, qc_values, n_rois, sort_idx, qc_thresh=0.2, perm=True):
+def scrubbing_analysis(qc_values, group_timeseries, sort_idx, qc_thresh=0.2, perm=True):
     """Perform Power scrubbing analysis.
 
     Note that correlations from scrubbed timeseries are subtracted from correlations from
@@ -23,12 +23,10 @@ def scrubbing_analysis(group_timeseries, qc_values, n_rois, sort_idx, qc_thresh=
 
     Parameters
     ----------
-    group_timeseries : (N,) list
-        List of (R, T) arrays
     qc_values : (N,) list
         List of (T,) arrays
-    n_rois : int
-        Equal to R.
+    group_timeseries : (N,) list
+        List of (R, T) arrays
     qc_thresh : float
         Threshold to apply to QC values for identifying bad volumes.
     perm : bool
@@ -43,8 +41,7 @@ def scrubbing_analysis(group_timeseries, qc_values, n_rois, sort_idx, qc_thresh=
         array will be ((R * R) - R) / 2 (upper triangle of RxR correlation
         matrix).
     """
-    # double check this but should replace argument
-    # n_rois = group_timeseries[0].shape[0]
+    n_rois = group_timeseries[0].shape[0]
     triu_idx = np.triu_indices(n_rois, k=1)
     n_pairs = len(triu_idx[0])
     n_subjects = len(group_timeseries)
@@ -75,7 +72,7 @@ def scrubbing_analysis(group_timeseries, qc_values, n_rois, sort_idx, qc_thresh=
     return mean_delta_r
 
 
-def high_low_motion_analysis(mean_qcs, raw_corr_mats, sort_idx):
+def high_low_motion_analysis(mean_qcs, corr_mats, sort_idx):
     """Perform high-low motion analysis.
 
     Split the sample using a median split of the QC metric (generally mean FD).
@@ -86,22 +83,22 @@ def high_low_motion_analysis(mean_qcs, raw_corr_mats, sort_idx):
     Parameters
     ----------
     mean_qcs : numpy.ndarray of shape (n_subjects,)
-    raw_corr_mats : numpy.ndarray of shape (n_subjects, n_roi_pairs)
+    corr_mats : numpy.ndarray of shape (n_subjects, n_roi_pairs)
     sort_idx : numpy.ndarray of shape (n_roi_pairs,)
     """
     hm_idx = mean_qcs >= np.median(mean_qcs)
     lm_idx = mean_qcs < np.median(mean_qcs)
-    hm_mean_corr = np.mean(raw_corr_mats[hm_idx, :], axis=0)
-    lm_mean_corr = np.mean(raw_corr_mats[lm_idx, :], axis=0)
+    hm_mean_corr = np.mean(corr_mats[hm_idx, :], axis=0)
+    lm_mean_corr = np.mean(corr_mats[lm_idx, :], axis=0)
     hl_corr_diff = hm_mean_corr - lm_mean_corr
     hl_corr_diff = hl_corr_diff[sort_idx]
     return hl_corr_diff
 
 
-def qcrsfc(mean_qcs, z_corr_mats, sort_idx):
+def qcrsfc(mean_qcs, corr_mats, sort_idx):
     """Perform quality-control resting-state functional connectivity analysis."""
     # Correlate each ROI pair's z-value against QC measure (usually FD) across subjects.
-    qcrsfc_rs = fast_pearson(z_corr_mats.T, mean_qcs)
+    qcrsfc_rs = fast_pearson(corr_mats.T, mean_qcs)
 
     # Sort coefficients by distance
     qcrsfc_rs = qcrsfc_rs[sort_idx]
@@ -115,7 +112,6 @@ def scrubbing_null_distribution(
     smoothing_curve_distances,
     sort_idx,
     smoothing_curve_dist_idx,
-    n_rois,
     qc_thresh,
     window,
     n_iters=10000,
@@ -126,9 +122,8 @@ def scrubbing_null_distribution(
     for i_iter in range(n_iters):
         perm_qcs = [np.random.permutation(perm_qc) for perm_qc in qc_values]
         perm_mean_delta_r = scrubbing_analysis(
-            ts_all,
             perm_qcs,
-            n_rois,
+            ts_all,
             sort_idx,
             qc_thresh,
             perm=True,
@@ -146,7 +141,6 @@ def other_null_distributions(
     smoothing_curve_distances,
     sort_idx,
     smoothing_curve_dist_idx,
-    n_rois,
     qc_thresh,
     window,
     n_iters=10000,
@@ -316,7 +310,7 @@ def run(
 
     # Scrubbing analysis
     LGR.info("Performing scrubbing analysis")
-    scrub_values = scrubbing_analysis(ts_all, qc, n_rois, sort_idx, qc_thresh, perm=False)
+    scrub_values = scrubbing_analysis(qc, ts_all, sort_idx, qc_thresh, perm=False)
     analysis_values["scrubbing"] = scrub_values
     scrub_smoothing_curve = moving_average(scrub_values, window)[smoothing_curve_dist_idx]
     smoothing_curves["scrubbing"] = scrub_smoothing_curve
@@ -343,7 +337,6 @@ def run(
         smoothing_curve_distances,
         sort_idx,
         smoothing_curve_dist_idx,
-        n_rois,
         qc_thresh=qc_thresh,
         window=window,
         n_iters=n_iters,
@@ -354,7 +347,6 @@ def run(
         smoothing_curve_distances,
         sort_idx,
         smoothing_curve_dist_idx,
-        n_rois,
         qc_thresh=qc_thresh,
         window=window,
         n_iters=n_iters,
