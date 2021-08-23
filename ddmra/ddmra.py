@@ -1,6 +1,7 @@
 """Perform distance-dependent motion-related artifact analyses."""
 import logging
 import os.path as op
+from os import makedirs
 
 import numpy as np
 import pandas as pd
@@ -72,7 +73,7 @@ def scrubbing_analysis(qc_values, group_timeseries, sort_idx, qc_thresh=0.2, per
     return mean_delta_r
 
 
-def high_low_motion_analysis(mean_qcs, corr_mats, sort_idx):
+def highlow_analysis(mean_qcs, corr_mats, sort_idx):
     """Perform high-low motion analysis.
 
     Split the sample using a median split of the QC metric (generally mean FD).
@@ -95,7 +96,7 @@ def high_low_motion_analysis(mean_qcs, corr_mats, sort_idx):
     return hl_corr_diff
 
 
-def qcrsfc(mean_qcs, corr_mats, sort_idx):
+def qcrsfc_analysis(mean_qcs, corr_mats, sort_idx):
     """Perform quality-control resting-state functional connectivity analysis."""
     # Correlate each ROI pair's z-value against QC measure (usually FD) across subjects.
     qcrsfc_rs = fast_pearson(corr_mats.T, mean_qcs)
@@ -156,13 +157,13 @@ def other_null_distributions(
         perm_mean_qcs = np.random.permutation(mean_qcs)
 
         # QC:RSFC analysis
-        perm_qcrsfc_rs = qcrsfc(perm_mean_qcs, corr_mats, sort_idx)
+        perm_qcrsfc_rs = qcrsfc_analysis(perm_mean_qcs, corr_mats, sort_idx)
         perm_qcrsfc_smoothing_curve[i_iter, :] = moving_average(perm_qcrsfc_rs, window)[
             smoothing_curve_dist_idx
         ]
 
         # High-low analysis
-        perm_hl_diff = high_low_motion_analysis(perm_mean_qcs, corr_mats, sort_idx)
+        perm_hl_diff = highlow_analysis(perm_mean_qcs, corr_mats, sort_idx)
         perm_hl_smoothing_curve[i_iter, :] = moving_average(perm_hl_diff, window)[
             smoothing_curve_dist_idx
         ]
@@ -204,9 +205,9 @@ def run(
     -----
     This function writes out several files to out_dir:
     - ``analysis_values.tsv.gz``: Raw analysis values for analyses.
-        Has four columns: distance, qcrsfc, scrubbing, and high_low.
+        Has four columns: distance, qcrsfc, scrubbing, and highlow.
     - ``smoothing_curves.tsv.gz``: Smoothing curve information for analyses.
-        Has four columns: distance, qcrsfc, scrubbing, and high_low.
+        Has four columns: distance, qcrsfc, scrubbing, and highlow.
     - ``[analysis]_analysis_null_smoothing_curves.txt``:
         Null smoothing curves from each analysis.
         Contains 2D array, where number of columns is same
@@ -214,6 +215,8 @@ def run(
         and number of rows is number of iterations for permutation analysis.
     - ``[analysis]_analysis.png``: Figure for each analysis.
     """
+    makedirs(out_dir, exist_ok=True)
+
     # create LGR with 'spam_application'
     LGR.setLevel(logging.DEBUG)
     # create file handler which logs even debug messages
@@ -278,13 +281,13 @@ def run(
 
     del (raw_corrs, raw_ts, spheres_masker, atlas, coords)
 
-    smoothing_curves = pd.DataFrame(columns=["distance", "qcrsfc", "high_low", "scrubbing"])
-    analysis_values = pd.DataFrame(columns=["distance", "qcrsfc", "high_low", "scrubbing"])
+    smoothing_curves = pd.DataFrame(columns=["distance", "qcrsfc", "highlow", "scrubbing"])
+    analysis_values = pd.DataFrame(columns=["distance", "qcrsfc", "highlow", "scrubbing"])
     analysis_values["distance"] = distances
 
     # QC:RSFC r analysis
     LGR.info("Performing QC:RSFC analysis")
-    qcrsfc_values = qcrsfc(mean_qc, z_corr_mats, sort_idx)
+    qcrsfc_values = qcrsfc_analysis(mean_qc, z_corr_mats, sort_idx)
     analysis_values["qcrsfc"] = qcrsfc_values
     qcrsfc_smoothing_curve = moving_average(qcrsfc_values, window)
 
@@ -302,11 +305,11 @@ def run(
 
     # High-low motion analysis
     LGR.info("Performing high-low motion analysis")
-    high_low_values = high_low_motion_analysis(mean_qc, z_corr_mats, sort_idx)
-    analysis_values["high_low"] = high_low_values
-    hl_smoothing_curve = moving_average(high_low_values, window)[smoothing_curve_dist_idx]
-    smoothing_curves["high_low"] = hl_smoothing_curve
-    del high_low_values, hl_smoothing_curve
+    highlow_values = highlow_analysis(mean_qc, z_corr_mats, sort_idx)
+    analysis_values["highlow"] = highlow_values
+    hl_smoothing_curve = moving_average(highlow_values, window)[smoothing_curve_dist_idx]
+    smoothing_curves["highlow"] = hl_smoothing_curve
+    del highlow_values, hl_smoothing_curve
 
     # Scrubbing analysis
     LGR.info("Performing scrubbing analysis")
@@ -368,8 +371,13 @@ def run(
 
     METRIC_LABELS = {
         "qcrsfc": "QC:RSFC r\n(QC = mean FD)",
-        "high_low": r"High-low motion $\Delta$z",
+        "highlow": r"High-low motion $\Delta$z",
         "scrubbing": r"Scrubbing $\Delta$z",
+    }
+    YLIMS = {
+        "qcrsfc": (-0.5, 0.5),
+        "highlow": (-0.5, 0.5),
+        "scrubbing": (-0.05, 0.05),
     }
 
     for analysis, label in METRIC_LABELS.items():
@@ -389,6 +397,7 @@ def run(
             smoothing_curve_distances,
             perm_smoothing_curves,
             n_lines=50,
+            ylim=YLIMS[analysis],
             metric_name=label,
             fig=None,
             ax=None,
@@ -396,4 +405,3 @@ def run(
         fig.savefig(op.join(out_dir, f"{analysis}_analysis.png"), dpi=400)
 
     LGR.info("Workflow completed")
-    LGR.shutdown()

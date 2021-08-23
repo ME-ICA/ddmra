@@ -22,12 +22,13 @@ def plot_analysis(
     perm_smoothing_curves,
     n_lines=50,
     metric_name="QC:RSFC r\n(QC = mean FD)",
+    ylim=(-0.5, 0.5),
     fig=None,
     ax=None,
 ):
     """Generate plot for a DDMRA analysis."""
     if not ax:
-        fig, ax = plt.subplots(figsize=(10, 14))
+        fig, ax = plt.subplots(figsize=(16, 10))
 
     v1, v2 = 35, 100  # distances to evaluate
     n_lines = np.minimum(n_lines, perm_smoothing_curves.shape[0])
@@ -56,9 +57,9 @@ def plot_analysis(
     ax.plot(curve_distances, smoothing_curve, color="white")
 
     ax.set_ylabel(metric_name, fontsize=32, labelpad=-30)
-    ax.set_yticks([-0.5, 0.5])
-    ax.set_yticklabels([-0.5, 0.5], fontsize=32)
-    ax.set_ylim(-0.5, 0.5)
+    ax.set_yticks(ylim)
+    ax.set_yticklabels(ylim, fontsize=32)
+    ax.set_ylim(ylim)
 
     ax.set_xlabel("Distance (mm)", fontsize=32)
     ax.set_xticks([0, 50, 100, 150])
