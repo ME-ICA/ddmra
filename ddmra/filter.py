@@ -52,7 +52,7 @@ def filter_earl(motpars, t_r, radius=50):
     motpars_filtered : (T, 6) array_like
     fd_filtered : (T,) array_like
     """
-    # Create fthe filter
+    # Create the filter
     b, a = respiration_iirnotch(t_r, bpm_min=18.582, bpm_max=25.7263)
 
     # Filter motion numbers

@@ -1,7 +1,5 @@
 """Miscellaneous utility functions for the DDMRA package."""
-
 import numpy as np
-from scipy import stats
 
 
 def get_val(x_arr, y_arr, x_val):
@@ -49,29 +47,84 @@ def get_val(x_arr, y_arr, x_val):
     return y_val
 
 
-def rank_p(test_value, null_array, tail="two"):
-    """Return rank-based p-value for test value against null array.
+def null_to_p(test_value, null_array, tail="two", symmetric=False):
+    """Return p-value for test value(s) against null array.
 
     Parameters
     ----------
-    test_value : float
-        Value for which to determine rank-based p-value.
-    null_array : 1D numpy.ndarray
-        Values to use as null distribution.
-    tail : {'two', 'upper', 'lower'}
-        Tail for computing p-value.
+    test_value : 1D array_like
+        Values for which to determine p-value.
+    null_array : 1D array_like
+        Null distribution against which test_value is compared.
+    tail : {'two', 'upper', 'lower'}, optional
+        Whether to compare value against null distribution in a two-sided
+        ('two') or one-sided ('upper' or 'lower') manner.
+        If 'upper', then higher values for the test_value are more significant.
+        If 'lower', then lower values for the test_value are more significant.
+        Default is 'two'.
+    symmetric : bool
+        When tail="two", indicates how to compute p-values. When False (default),
+        both one-tailed p-values are computed, and the two-tailed p is double
+        the minimum one-tailed p. When True, it is assumed that the null
+        distribution is zero-centered and symmetric, and the two-tailed p-value
+        is computed as P(abs(test_value) >= abs(null_array)).
+
+    Returns
+    -------
+    p_value : :obj:`float`
+        P-value(s) associated with the test value when compared against the null
+        distribution. Return type matches input type (i.e., a float if
+        test_value is a single float, and an array if test_value is an array).
+
+    Notes
+    -----
+    P-values are clipped based on the number of elements in the null array.
+    Therefore no p-values of 0 or 1 should be produced.
+    When the null distribution is known to be symmetric and centered on zero,
+    and two-tailed p-values are desired, use symmetric=True, as it is
+    approximately twice as efficient computationally, and has lower variance.
     """
-    if tail == "two":
-        p_value = (
-            (50 - np.abs(stats.percentileofscore(null_array, test_value) - 50.0)) * 2.0 / 100.0
-        )
-    elif tail == "upper":
-        p_value = 1 - (stats.percentileofscore(null_array, test_value) / 100.0)
-    elif tail == "lower":
-        p_value = stats.percentileofscore(null_array, test_value) / 100.0
+    if tail not in {"two", "upper", "lower"}:
+        raise ValueError('Argument "tail" must be one of ["two", "upper", "lower"]')
+
+    return_first = isinstance(test_value, (float, int))
+    test_value = np.atleast_1d(test_value)
+    null_array = np.array(null_array)
+
+    # For efficiency's sake, if there are more than 1000 values, pass only the unique
+    # values through percentileofscore(), and then reconstruct.
+    if len(test_value) > 1000:
+        reconstruct = True
+        test_value, uniq_idx = np.unique(test_value, return_inverse=True)
     else:
-        raise ValueError('Argument "tail" must be one of ["two", "upper", ' '"lower"]')
-    return p_value
+        reconstruct = False
+
+    def compute_p(t, null):
+        null = np.sort(null)
+        idx = np.searchsorted(null, t, side="left").astype(float)
+        return 1 - idx / len(null)
+
+    if tail == "two":
+        if symmetric:
+            p = compute_p(np.abs(test_value), np.abs(null_array))
+        else:
+            p_l = compute_p(test_value, null_array)
+            p_r = compute_p(test_value * -1, null_array * -1)
+            p = 2 * np.minimum(p_l, p_r)
+    elif tail == "lower":
+        p = compute_p(test_value * -1, null_array * -1)
+    else:
+        p = compute_p(test_value, null_array)
+
+    # ensure p_value in the following range:
+    # smallest_value <= p_value <= (1.0 - smallest_value)
+    smallest_value = np.maximum(np.finfo(float).eps, 1.0 / len(null_array))
+    result = np.maximum(smallest_value, np.minimum(p, 1.0 - smallest_value))
+
+    if reconstruct:
+        result = result[uniq_idx]
+
+    return result[0] if return_first else result
 
 
 def fast_pearson(X, y):

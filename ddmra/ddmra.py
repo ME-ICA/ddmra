@@ -1,20 +1,19 @@
-"""
-Perform distance-dependent motion-related artifact analyses.
-"""
+"""Perform distance-dependent motion-related artifact analyses."""
 import logging
 import os.path as op
 
 import numpy as np
+import pandas as pd
 from nilearn import datasets, input_data
 from scipy.spatial.distance import pdist, squareform
 
-from .filter import filter_earl
-from .utils import fast_pearson, get_fd_power, moving_average
+from .plotting import plot_analysis
+from .utils import fast_pearson, moving_average
 
 LGR = logging.getLogger("ddmra")
 
 
-def scrubbing_analysis(group_timeseries, fds_analysis, n_rois, qc_thresh=0.2, perm=True):
+def scrubbing_analysis(group_timeseries, qc_values, n_rois, sort_idx, qc_thresh=0.2, perm=True):
     """Perform Power scrubbing analysis.
 
     Note that correlations from scrubbed timeseries are subtracted from correlations from
@@ -26,7 +25,7 @@ def scrubbing_analysis(group_timeseries, fds_analysis, n_rois, qc_thresh=0.2, pe
     ----------
     group_timeseries : (N,) list
         List of (R, T) arrays
-    fds_analysis : (N,) list
+    qc_values : (N,) list
         List of (T,) arrays
     n_rois : int
         Equal to R.
@@ -53,7 +52,7 @@ def scrubbing_analysis(group_timeseries, fds_analysis, n_rois, qc_thresh=0.2, pe
     c = 0  # included subject counter
     for subj in range(n_subjects):
         ts_arr = group_timeseries[subj]
-        qc_arr = fds_analysis[subj]
+        qc_arr = qc_values[subj]
         keep_idx = qc_arr <= qc_thresh
         # Subjects with no timepoints excluded or with more than 50% excluded
         # will be excluded from analysis.
@@ -68,10 +67,11 @@ def scrubbing_analysis(group_timeseries, fds_analysis, n_rois, qc_thresh=0.2, pe
             c += 1
 
     if not perm:
-        LGR.info("{0} of {1} subjects retained in scrubbing " "analysis".format(c, n_subjects))
+        LGR.info(f"{c} of {n_subjects} subjects retained in scrubbing analysis")
 
     delta_rs = delta_rs[:c, :]
     mean_delta_r = np.mean(delta_rs, axis=0)
+    mean_delta_r = mean_delta_r[sort_idx]
     return mean_delta_r
 
 
@@ -109,16 +109,81 @@ def qcrsfc(mean_qcs, z_corr_mats, sort_idx):
     return qcrsfc_rs
 
 
+def scrubbing_null_distribution(
+    qc_values,
+    ts_all,
+    smoothing_curve_distances,
+    sort_idx,
+    smoothing_curve_dist_idx,
+    n_rois,
+    qc_thresh,
+    window,
+    n_iters=10000,
+):
+    """Generate null distribution smoothing curves for scrubbing analysis."""
+    qc_values = [subj_qc_values.copy() for subj_qc_values in qc_values]
+    perm_scrub_smoothing_curve = np.zeros((n_iters, len(smoothing_curve_distances)))
+    for i_iter in range(n_iters):
+        perm_qcs = [np.random.permutation(perm_qc) for perm_qc in qc_values]
+        perm_mean_delta_r = scrubbing_analysis(
+            ts_all,
+            perm_qcs,
+            n_rois,
+            sort_idx,
+            qc_thresh,
+            perm=True,
+        )
+        perm_scrub_smoothing_curve[i_iter, :] = moving_average(perm_mean_delta_r, window)[
+            smoothing_curve_dist_idx
+        ]
+
+    return perm_scrub_smoothing_curve
+
+
+def other_null_distributions(
+    qc_values,
+    corr_mats,
+    smoothing_curve_distances,
+    sort_idx,
+    smoothing_curve_dist_idx,
+    n_rois,
+    qc_thresh,
+    window,
+    n_iters=10000,
+):
+    """Generate null distribution smoothing curves for QC:RSFC and high-low motion analyses."""
+    qc_values = [subj_qc_values.copy() for subj_qc_values in qc_values]
+    mean_qcs = np.array([np.mean(subj_qc_values) for subj_qc_values in qc_values])
+
+    perm_qcrsfc_smoothing_curve = np.zeros((n_iters, len(smoothing_curve_distances)))
+    perm_hl_smoothing_curve = np.zeros((n_iters, len(smoothing_curve_distances)))
+    for i_iter in range(n_iters):
+        # Prep for QC:RSFC and high-low motion analyses
+        perm_mean_qcs = np.random.permutation(mean_qcs)
+
+        # QC:RSFC analysis
+        perm_qcrsfc_rs = qcrsfc(perm_mean_qcs, corr_mats, sort_idx)
+        perm_qcrsfc_smoothing_curve[i_iter, :] = moving_average(perm_qcrsfc_rs, window)[
+            smoothing_curve_dist_idx
+        ]
+
+        # High-low analysis
+        perm_hl_diff = high_low_motion_analysis(perm_mean_qcs, corr_mats, sort_idx)
+        perm_hl_smoothing_curve[i_iter, :] = moving_average(perm_hl_diff, window)[
+            smoothing_curve_dist_idx
+        ]
+
+    return perm_qcrsfc_smoothing_curve, perm_hl_smoothing_curve
+
+
 def run(
     files,
-    motpars,
+    qc,
     out_dir=".",
+    confounds=None,
     n_iters=10000,
     qc_thresh=0.2,
     window=1000,
-    earl=False,
-    regress=False,
-    t_r=None,
 ):
     """Run scrubbing, high-low motion, and QCRSFC analyses.
 
@@ -126,10 +191,13 @@ def run(
     ----------
     files : (N,) list of nifti files
         List of 4D (X x Y x Z x T) images in MNI space.
-    fds_analysis : (N,) list of array-like
+    qc : (N,) list of array_like
         List of 1D (T) numpy arrays with QC metric values per img (e.g., FD or respiration).
     out_dir : str, optional
         Output directory. Default is current directory.
+    confounds : None or (N,) list of array-like, optional
+        List of 2D (T) numpy arrays with confounds per img.
+        Default is None (no confounds are removed).
     n_iters : int, optional
         Number of iterations to run to generate null distributions. Default is 10000.
     qc_thresh : float, optional
@@ -137,12 +205,6 @@ def run(
     window : int, optional
         Number of units (pairs of ROIs) to include when averaging to generate smoothing curve.
         Default is 1000.
-    earl : bool, optional
-        Whether apply the Earl filter to the motion parameters or not. Default is False.
-    regress : bool, optional
-        Regress motion parameters from the time series or not. Default is False.
-    t_r : float or None, optional
-        Repetition time. Only necessary if `earl` is True.
 
     Notes
     -----
@@ -191,7 +253,6 @@ def run(
     LGR.addHandler(fh)
 
     LGR.info("Preallocating matrices")
-    assert len(files) == len(motpars)
     n_subjects = len(files)
 
     # Load atlas and associated masker
@@ -199,16 +260,13 @@ def run(
     coords = np.vstack((atlas.rois["x"], atlas.rois["y"], atlas.rois["z"])).T
     n_rois = coords.shape[0]
     triu_idx = np.triu_indices(n_rois, k=1)
-    dists = squareform(pdist(coords))
-    dists = dists[triu_idx]
+    distances = squareform(pdist(coords))
+    distances = distances[triu_idx]
 
     # Sorting index for distances
-    sort_idx = dists.argsort()
-    all_sorted_dists = dists[sort_idx]
-    np.savetxt(op.join(out_dir, "all_sorted_distances.txt"), all_sorted_dists)
-    unique_dists_idx = np.array(
-        [np.where(all_sorted_dists == i)[0][0] for i in np.unique(all_sorted_dists)]
-    )
+    sort_idx = distances.argsort()
+    distances = distances[sort_idx]
+    unique_dists_idx = np.array([np.where(distances == i)[0][0] for i in np.unique(distances)])
 
     LGR.info("Creating masker")
     spheres_masker = input_data.NiftiSpheresMasker(
@@ -222,31 +280,19 @@ def run(
         high_pass=None,
     )
 
-    # Apply filter is necessary
-    motpars_analysis, fds_analysis = [], []
-    for motpars_ in motpars:
-        if earl:
-            LGR.info("Filtering motion parameters")
-            motpars_filt, fd_filt = filter_earl(motpars_, t_r)
-            motpars_analysis.append(motpars_filt)
-            fds_analysis.append(fd_filt)
-        else:
-            motpars_analysis.append(motpars_)
-            fds_analysis.append(get_fd_power(motpars_, unit="rad"))
-
     # prep for qcrsfc and high-low motion analyses
-    mean_qcs = np.array([np.mean(qc) for qc in fds_analysis])
-    raw_corr_mats = np.zeros((n_subjects, dists.size))
+    mean_qc = np.array([np.mean(subj_qc) for subj_qc in qc])
+    z_corr_mats = np.zeros((n_subjects, distances.size))
 
     # Get correlation matrices
     ts_all = []
     LGR.info("Building correlation matrices")
+    if confounds:
+        LGR.info("Regressing confounds out of data.")
+
     for i_sub in range(n_subjects):
-        if regress:
-            raw_ts = spheres_masker.fit_transform(
-                files[i_sub],
-                confounds=motpars_analysis[i_sub],
-            ).T
+        if confounds:
+            raw_ts = spheres_masker.fit_transform(files[i_sub], confounds=confounds[i_sub]).T
         else:
             raw_ts = spheres_masker.fit_transform(files[i_sub]).T
 
@@ -255,99 +301,128 @@ def run(
         ts_all.append(raw_ts)
         raw_corrs = np.corrcoef(raw_ts)
         raw_corrs = raw_corrs[triu_idx]
-        raw_corr_mats[i_sub, :] = raw_corrs
+        z_corr_mats[i_sub, :] = np.arctanh(raw_corrs)
 
-    z_corr_mats = np.arctanh(raw_corr_mats)
     del (raw_corrs, raw_ts, spheres_masker, atlas, coords)
 
-    smoothing_curves = pd.DataFrame(
-        columns=["distance", "qcrsfc", "high_low", "scrubbing"],
-    )
+    smoothing_curves = pd.DataFrame(columns=["distance", "qcrsfc", "high_low", "scrubbing"])
+    analysis_values = pd.DataFrame(columns=["distance", "qcrsfc", "high_low", "scrubbing"])
+    analysis_values["distance"] = distances
 
     # QC:RSFC r analysis
     LGR.info("Performing QC:RSFC analysis")
-    qcrsfc_rs = qcrsfc(
-        mean_qcs,
-        z_corr_mats,
-        sort_idx
-    )
-
-    # Calculate smoothing curve over distance
-    qcrsfc_smoothing_curve = moving_average(qcrsfc_rs, window)
+    qcrsfc_values = qcrsfc(mean_qc, z_corr_mats, sort_idx)
+    analysis_values["qcrsfc"] = qcrsfc_values
+    qcrsfc_smoothing_curve = moving_average(qcrsfc_values, window)
 
     # Quick interlude to help reduce arrays
-    keep_idx = np.intersect1d(np.where(~np.isnan(qcrsfc_smoothing_curve))[0], unique_dists_idx)
-    keep_sorted_dists = all_sorted_dists[keep_idx]
-    smoothing_curves["distance"] = keep_sorted_dists
+    # Identify unique distances that don't have NaNs in the smoothing curve
+    smoothing_curve_dist_idx = np.intersect1d(
+        np.where(~np.isnan(qcrsfc_smoothing_curve))[0], unique_dists_idx
+    )
+    smoothing_curve_distances = distances[smoothing_curve_dist_idx]
+    smoothing_curves["distance"] = smoothing_curve_distances
 
-    qcrsfc_smoothing_curve = qcrsfc_smoothing_curve[keep_idx]
+    qcrsfc_smoothing_curve = qcrsfc_smoothing_curve[smoothing_curve_dist_idx]
     smoothing_curves["qcrsfc"] = qcrsfc_smoothing_curve
-    np.savetxt(op.join(out_dir, "qcrsfc_analysis_values.txt"), qcrsfc_rs)
+    del qcrsfc_values, qcrsfc_smoothing_curve
 
     # High-low motion analysis
     LGR.info("Performing high-low motion analysis")
-    hl_corr_diff = high_low_motion_analysis(
-        mean_qcs,
-        raw_corr_mats,
-        sort_idx
-    )
-    np.savetxt(op.join(out_dir, "highlow_analysis_values.txt"), hl_corr_diff)
-    hl_smoothing_curve = moving_average(hl_corr_diff, window)
-    hl_smoothing_curve = hl_smoothing_curve[keep_idx]
+    high_low_values = high_low_motion_analysis(mean_qc, z_corr_mats, sort_idx)
+    analysis_values["high_low"] = high_low_values
+    hl_smoothing_curve = moving_average(high_low_values, window)[smoothing_curve_dist_idx]
     smoothing_curves["high_low"] = hl_smoothing_curve
+    del high_low_values, hl_smoothing_curve
 
     # Scrubbing analysis
     LGR.info("Performing scrubbing analysis")
-    mean_delta_r = scrubbing_analysis(ts_all, fds_analysis, n_rois, qc_thresh, perm=False)
-    mean_delta_r = mean_delta_r[sort_idx]
-    scrub_smoothing_curve = moving_average(mean_delta_r, window)
-    np.savetxt(op.join(out_dir, "scrubbing_analysis_values.txt"), mean_delta_r)
-    scrub_smoothing_curve = scrub_smoothing_curve[keep_idx]
+    scrub_values = scrubbing_analysis(ts_all, qc, n_rois, sort_idx, qc_thresh, perm=False)
+    analysis_values["scrubbing"] = scrub_values
+    scrub_smoothing_curve = moving_average(scrub_values, window)[smoothing_curve_dist_idx]
     smoothing_curves["scrubbing"] = scrub_smoothing_curve
-    del mean_delta_r, scrub_smoothing_curve
+    del scrub_values, scrub_smoothing_curve
 
     smoothing_curves.to_csv(
-        op.join(out_dir, "smoothing_curves.tsv"),
+        op.join(out_dir, "smoothing_curves.tsv.gz"),
         sep="\t",
         line_terminator="\n",
+        index=False,
+    )
+    analysis_values.to_csv(
+        op.join(out_dir, "analysis_values.tsv.gz"),
+        sep="\t",
+        line_terminator="\n",
+        index=False,
     )
 
     # Null distributions
     LGR.info("Building null distributions with permutations")
-    qcs_copy = [qc.copy() for qc in fds_analysis]
-    perm_scrub_smoothing_curve = np.zeros((n_iters, len(keep_sorted_dists)))
-    perm_qcrsfc_smoothing_curve = np.zeros((n_iters, len(keep_sorted_dists)))
-    perm_hl_smoothing_curve = np.zeros((n_iters, len(keep_sorted_dists)))
-    for i_iter in range(n_iters):
-        # Prep for QC:RSFC and high-low motion analyses
-        perm_mean_qcs = np.random.permutation(mean_qcs)
-
-        # QC:RSFC analysis
-        perm_qcrsfc_rs = qcrsfc(perm_mean_qcs, z_corr_mats, sort_idx)
-        perm_qcrsfc_smoothing_curve[i_iter, :] = moving_average(perm_qcrsfc_rs, window)[keep_idx]
-
-        # High-low analysis
-        perm_hl_diff = high_low_motion_analysis(perm_mean_qcs, raw_corr_mats, sort_idx)
-        perm_hl_smoothing_curve[i_iter, :] = moving_average(perm_hl_diff, window)[keep_idx]
-
-        # Scrubbing analysis
-        perm_qcs = [np.random.permutation(perm_qc) for perm_qc in qcs_copy]
-        perm_mean_delta_r = scrubbing_analysis(ts_all, perm_qcs, n_rois, qc_thresh, perm=True)
-        perm_mean_delta_r = perm_mean_delta_r[sort_idx]
-        perm_scrub_smoothing_curve[i_iter, :] = moving_average(perm_mean_delta_r, window)[keep_idx]
+    perm_qcrsfc_smoothing_curves, perm_hl_smoothing_curves = other_null_distributions(
+        qc,
+        z_corr_mats,
+        smoothing_curve_distances,
+        sort_idx,
+        smoothing_curve_dist_idx,
+        n_rois,
+        qc_thresh=qc_thresh,
+        window=window,
+        n_iters=n_iters,
+    )
+    perm_scrub_smoothing_curves = scrubbing_null_distribution(
+        qc,
+        ts_all,
+        smoothing_curve_distances,
+        sort_idx,
+        smoothing_curve_dist_idx,
+        n_rois,
+        qc_thresh=qc_thresh,
+        window=window,
+        n_iters=n_iters,
+    )
 
     np.savetxt(
         op.join(out_dir, "qcrsfc_analysis_null_smoothing_curves.txt"),
-        perm_qcrsfc_smoothing_curve,
+        perm_qcrsfc_smoothing_curves,
     )
     np.savetxt(
         op.join(out_dir, "highlow_analysis_null_smoothing_curves.txt"),
-        perm_hl_smoothing_curve,
+        perm_hl_smoothing_curves,
     )
     np.savetxt(
         op.join(out_dir, "scrubbing_analysis_null_smoothing_curves.txt"),
-        perm_scrub_smoothing_curve,
+        perm_scrub_smoothing_curves,
     )
+    del perm_qcrsfc_smoothing_curves, perm_hl_smoothing_curves, perm_scrub_smoothing_curves
+
+    METRIC_LABELS = {
+        "qcrsfc": "QC:RSFC r\n(QC = mean FD)",
+        "high_low": r"High-low motion $\Delta$z",
+        "scrubbing": r"Scrubbing $\Delta$z",
+    }
+
+    for analysis, label in METRIC_LABELS.items():
+        values = analysis_values[analysis].values
+        smoothing_curve = smoothing_curves[analysis].values
+        perm_smoothing_curves = np.loadtxt(
+            op.join(
+                out_dir,
+                f"{analysis}_analysis_null_smoothing_curves.txt",
+            )
+        )
+
+        fig, ax = plot_analysis(
+            values,
+            distances,
+            smoothing_curve,
+            smoothing_curve_distances,
+            perm_smoothing_curves,
+            n_lines=50,
+            metric_name=label,
+            fig=None,
+            ax=None,
+        )
+        fig.savefig(op.join(out_dir, f"{analysis}_analysis.png"), dpi=400)
 
     LGR.info("Workflow completed")
     LGR.shutdown()
