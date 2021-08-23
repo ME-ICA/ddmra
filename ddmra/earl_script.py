@@ -1,5 +1,5 @@
-"""
-Generate distance-dependent motion-related artifact plots
+"""Generate distance-dependent motion-related artifact plots.
+
 The rank for the intercept (smoothing curve at 35mm) indexes general dependence
 on motion (i.e., a mix of global and focal effects), while the rank for the
 slope (difference in smoothing curve at 100mm and 35mm) indexes distance
