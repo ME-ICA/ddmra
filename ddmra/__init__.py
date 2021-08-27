@@ -1,6 +1,6 @@
 """DDMRA: A Python package for distance-dependent motion-related artifact analysis."""
 
-from .ddmra import highlow_analysis, qcrsfc_analysis, scrubbing_analysis
+from .analysis import highlow_analysis, qcrsfc_analysis, scrubbing_analysis
 from .workflows import run_analyses
 
 __all__ = [

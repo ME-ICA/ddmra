@@ -5,7 +5,7 @@ import numpy as np
 
 from .utils import fast_pearson, moving_average
 
-LGR = logging.getLogger("ddmra")
+LGR = logging.getLogger("analysis")
 
 
 def scrubbing_analysis(qc_values, group_timeseries, sort_idx, qc_thresh=0.2, perm=True):

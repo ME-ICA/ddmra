@@ -8,7 +8,7 @@ import pandas as pd
 from nilearn import datasets, input_data
 from scipy.spatial.distance import pdist, squareform
 
-from . import ddmra, plotting, utils
+from . import analysis, plotting, utils
 
 LGR = logging.getLogger("workflows")
 
@@ -130,7 +130,7 @@ def run_analyses(
 
     # QC:RSFC r analysis
     LGR.info("Performing QC:RSFC analysis")
-    qcrsfc_values = ddmra.qcrsfc_analysis(mean_qc, z_corr_mats)
+    qcrsfc_values = analysis.qcrsfc_analysis(mean_qc, z_corr_mats)
     analysis_values["qcrsfc"] = qcrsfc_values
     qcrsfc_smoothing_curve = utils.moving_average(qcrsfc_values, window)
 
@@ -148,7 +148,7 @@ def run_analyses(
 
     # High-low motion analysis
     LGR.info("Performing high-low motion analysis")
-    highlow_values = ddmra.highlow_analysis(mean_qc, z_corr_mats)
+    highlow_values = analysis.highlow_analysis(mean_qc, z_corr_mats)
     analysis_values["highlow"] = highlow_values
     hl_smoothing_curve = utils.moving_average(highlow_values, window)[smoothing_curve_dist_idx]
     smoothing_curves["highlow"] = hl_smoothing_curve
@@ -156,7 +156,7 @@ def run_analyses(
 
     # Scrubbing analysis
     LGR.info("Performing scrubbing analysis")
-    scrub_values = ddmra.scrubbing_analysis(qc, ts_all, sort_idx, qc_thresh, perm=False)
+    scrub_values = analysis.scrubbing_analysis(qc, ts_all, sort_idx, qc_thresh, perm=False)
     analysis_values["scrubbing"] = scrub_values
     scrub_smoothing_curve = utils.moving_average(scrub_values, window)[smoothing_curve_dist_idx]
     smoothing_curves["scrubbing"] = scrub_smoothing_curve
@@ -177,7 +177,7 @@ def run_analyses(
 
     # Null distributions
     LGR.info("Building null distributions with permutations")
-    perm_qcrsfc_smoothing_curves, perm_hl_smoothing_curves = ddmra.other_null_distributions(
+    perm_qcrsfc_smoothing_curves, perm_hl_smoothing_curves = analysis.other_null_distributions(
         qc,
         z_corr_mats,
         smoothing_curve_distances,
@@ -186,7 +186,7 @@ def run_analyses(
         window=window,
         n_iters=n_iters,
     )
-    perm_scrub_smoothing_curves = ddmra.scrubbing_null_distribution(
+    perm_scrub_smoothing_curves = analysis.scrubbing_null_distribution(
         qc,
         ts_all,
         smoothing_curve_distances,
@@ -222,13 +222,13 @@ def run_analyses(
         "scrubbing": (-0.05, 0.05),
     }
 
-    for analysis, label in METRIC_LABELS.items():
-        values = analysis_values[analysis].values
-        smoothing_curve = smoothing_curves[analysis].values
+    for analysis_type, label in METRIC_LABELS.items():
+        values = analysis_values[analysis_type].values
+        smoothing_curve = smoothing_curves[analysis_type].values
         perm_smoothing_curves = np.loadtxt(
             op.join(
                 out_dir,
-                f"{analysis}_analysis_null_smoothing_curves.txt",
+                f"{analysis_type}_analysis_null_smoothing_curves.txt",
             )
         )
 
@@ -239,11 +239,11 @@ def run_analyses(
             smoothing_curve_distances,
             perm_smoothing_curves,
             n_lines=50,
-            ylim=YLIMS[analysis],
+            ylim=YLIMS[analysis_type],
             metric_name=label,
             fig=None,
             ax=None,
         )
-        fig.savefig(op.join(out_dir, f"{analysis}_analysis.png"), dpi=400)
+        fig.savefig(op.join(out_dir, f"{analysis_type}_analysis.png"), dpi=400)
 
     LGR.info("Workflow completed")
