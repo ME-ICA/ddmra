@@ -211,39 +211,6 @@ def run_analyses(
     )
     del perm_qcrsfc_smoothing_curves, perm_hl_smoothing_curves, perm_scrub_smoothing_curves
 
-    METRIC_LABELS = {
-        "qcrsfc": r"QC:RSFC $z_{r}$" + "\n(QC = mean FD)",
-        "highlow": r"High-low motion ${\Delta}z_{r}$",
-        "scrubbing": r"Scrubbing ${\Delta}z_{r}$",
-    }
-    YLIMS = {
-        "qcrsfc": (-1.0, 1.0),
-        "highlow": (-1.0, 1.0),
-        "scrubbing": (-0.05, 0.05),
-    }
-
-    for analysis_type, label in METRIC_LABELS.items():
-        values = analysis_values[analysis_type].values
-        smoothing_curve = smoothing_curves[analysis_type].values
-        perm_smoothing_curves = np.loadtxt(
-            op.join(
-                out_dir,
-                f"{analysis_type}_analysis_null_smoothing_curves.txt",
-            )
-        )
-
-        fig, ax = plotting.plot_analysis(
-            values,
-            distances,
-            smoothing_curve,
-            smoothing_curve_distances,
-            perm_smoothing_curves,
-            n_lines=50,
-            ylim=YLIMS[analysis_type],
-            metric_name=label,
-            fig=None,
-            ax=None,
-        )
-        fig.savefig(op.join(out_dir, f"{analysis_type}_analysis.png"), dpi=400)
+    plotting.plot_results(out_dir)
 
     LGR.info("Workflow completed")
