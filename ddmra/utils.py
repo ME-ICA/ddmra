@@ -221,3 +221,38 @@ def moving_average(values, window):
     buff = np.zeros(int(window / 2)) * np.nan
     sma = np.hstack((buff, sma, buff))[:-1]
     return sma
+
+
+def assess_significance(curve, null_curves, distances, intercept_distance, v2):
+    """Measure significance of smoothing curve against null curves.
+
+    Parameters
+    ----------
+    curve : numpy.ndarray of shape (U,)
+        U is distance value.
+    null_curves : numpy.ndarray of shape (P, U)
+        U is distance value, P is permutation.
+    distances : numpy.ndarray of shape (U,)
+        Distances in mm.
+    intercept_distance : float
+    v2 : float
+
+    Returns
+    -------
+    p_inter : float
+        P-value for intercept.
+    p_slope : float
+        P-value for slope.
+    """
+    assert curve.ndim == distances.ndim == 1
+    assert null_curves.ndim == 2
+    assert curve.shape[0] == null_curves.shape[1] == distances.shape[0]
+
+    intercept = get_val(distances, curve, intercept_distance)
+    slope = intercept - get_val(distances, curve, v2)
+    perm_intercepts = get_val(distances, null_curves, intercept_distance)
+    perm_slopes = perm_intercepts - get_val(distances, null_curves, v2)
+
+    p_inter = null_to_p(intercept, perm_intercepts, tail="upper")
+    p_slope = null_to_p(slope, perm_slopes, tail="upper")
+    return p_inter, p_slope

@@ -8,7 +8,7 @@ from .utils import get_fd_power
 
 
 def respiration_iirnotch(TR_in_sec, bpm_min=18.582, bpm_max=25.7263):
-    """Function for calculating filter parameters for respiration filter
+    """Calculate filter parameters for respiration filter.
 
     Takes in the TR (optional min/max breaths-per-min, bpm_min, bpm_max).
     Returns the parameters for IIR Notch filter.

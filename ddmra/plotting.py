@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
-from .utils import get_val, null_to_p
+from .ddmra import assess_significance
 
 sns.set_style("white")
 
@@ -26,20 +26,48 @@ def plot_analysis(
     fig=None,
     ax=None,
 ):
-    """Generate plot for a DDMRA analysis."""
+    """Generate plot for a DDMRA analysis.
+
+    Parameters
+    ----------
+    data_points : numpy.ndarray of shape (D,)
+        DDMRA-metric values for all ROI-to-ROI edges.
+    distances : numpy.ndarray of shape (D,)
+        All distances associated with data in data_points, in mm.
+    smoothing_curve : numpy.ndarray of shape (U,)
+        Smoothing curve of data points, with U points.
+        U being unique data points.
+    curve_distances : numpy.ndarray of shape (U,)
+    perm_smoothing_curves : numpy.ndarray of shape (P, U)
+    n_lines : int, optional
+    metric_name : str, optional
+    ylim : tuple, optional
+    fig : None or matplotlib.pyplot.Figure, optional
+    ax : None or matplotlib.pyplot.Axes, optional
+
+    Returns
+    -------
+    fig : matplotlib.pyplot.Figure
+    ax : matplotlib.pyplot.Axes
+    """
+    assert data_points.ndim == distances.ndim == smoothing_curve.ndim == curve_distances.ndim == 1
+    assert perm_smoothing_curves.ndim == 2
+    assert data_points.shape == distances.shape
+    assert smoothing_curve.shape == curve_distances.shape == perm_smoothing_curves.shape[1]
+
     if not ax:
         fig, ax = plt.subplots(figsize=(16, 10))
 
-    v1, v2 = 35, 100  # distances to evaluate
+    V1, V2 = 35, 100  # distances to evaluate
     n_lines = np.minimum(n_lines, perm_smoothing_curves.shape[0])
 
-    intercept = get_val(curve_distances, smoothing_curve, v1)
-    slope = intercept - get_val(curve_distances, smoothing_curve, v2)
-    perm_intercepts = get_val(curve_distances, perm_smoothing_curves, v1)
-    perm_slopes = perm_intercepts - get_val(curve_distances, perm_smoothing_curves, v2)
-
-    p_inter = null_to_p(intercept, perm_intercepts, tail="upper")
-    p_slope = null_to_p(slope, perm_slopes, tail="upper")
+    p_intercept, p_slope = assess_significance(
+        smoothing_curve,
+        perm_smoothing_curves,
+        curve_distances,
+        V1,
+        V2,
+    )
 
     sns.regplot(
         distances,
@@ -67,7 +95,7 @@ def plot_analysis(
     ax.set_xlim(0, np.ceil(np.max(distances) / 10) * 10)
 
     ax.annotate(
-        f"{v1} mm: {p_inter:.04f}\n{v1}-{v2} mm: {p_slope:.04f}",
+        f"{V1} mm: {p_intercept:.04f}\n{V1}-{V2} mm: {p_slope:.04f}",
         xy=(1, 0),
         xycoords="axes fraction",
         xytext=(-20, 20),
