@@ -108,18 +108,19 @@ def run_analyses(
     if confounds:
         LGR.info("Regressing confounds out of data.")
 
-    for i_sub in range(n_subjects):
+    for i_subj in range(n_subjects):
         if confounds:
-            raw_ts = spheres_masker.fit_transform(files[i_sub], confounds=confounds[i_sub]).T
+            raw_ts = spheres_masker.fit_transform(files[i_subj], confounds=confounds[i_subj]).T
         else:
-            raw_ts = spheres_masker.fit_transform(files[i_sub]).T
+            raw_ts = spheres_masker.fit_transform(files[i_subj]).T
 
         assert raw_ts.shape[0] == n_rois
 
         ts_all.append(raw_ts)
         raw_corrs = np.corrcoef(raw_ts)
         raw_corrs = raw_corrs[triu_idx]
-        z_corr_mats[i_sub, :] = np.arctanh(raw_corrs)
+        raw_corrs = raw_corrs[sort_idx]  # Sort from close to far ROI pairs
+        z_corr_mats[i_subj, :] = np.arctanh(raw_corrs)
 
     del (raw_corrs, raw_ts, spheres_masker, atlas, coords)
 
@@ -129,7 +130,7 @@ def run_analyses(
 
     # QC:RSFC r analysis
     LGR.info("Performing QC:RSFC analysis")
-    qcrsfc_values = ddmra.qcrsfc_analysis(mean_qc, z_corr_mats, sort_idx)
+    qcrsfc_values = ddmra.qcrsfc_analysis(mean_qc, z_corr_mats)
     analysis_values["qcrsfc"] = qcrsfc_values
     qcrsfc_smoothing_curve = utils.moving_average(qcrsfc_values, window)
 
@@ -147,7 +148,7 @@ def run_analyses(
 
     # High-low motion analysis
     LGR.info("Performing high-low motion analysis")
-    highlow_values = ddmra.highlow_analysis(mean_qc, z_corr_mats, sort_idx)
+    highlow_values = ddmra.highlow_analysis(mean_qc, z_corr_mats)
     analysis_values["highlow"] = highlow_values
     hl_smoothing_curve = utils.moving_average(highlow_values, window)[smoothing_curve_dist_idx]
     smoothing_curves["highlow"] = hl_smoothing_curve
@@ -180,7 +181,6 @@ def run_analyses(
         qc,
         z_corr_mats,
         smoothing_curve_distances,
-        sort_idx,
         smoothing_curve_dist_idx,
         qc_thresh=qc_thresh,
         window=window,
@@ -212,13 +212,13 @@ def run_analyses(
     del perm_qcrsfc_smoothing_curves, perm_hl_smoothing_curves, perm_scrub_smoothing_curves
 
     METRIC_LABELS = {
-        "qcrsfc": "QC:RSFC r\n(QC = mean FD)",
-        "highlow": r"High-low motion $\Delta$z",
-        "scrubbing": r"Scrubbing $\Delta$z",
+        "qcrsfc": r"QC:RSFC $z_{r}$" + "\n(QC = mean FD)",
+        "highlow": r"High-low motion ${\Delta}z_{r}$",
+        "scrubbing": r"Scrubbing ${\Delta}z_{r}$",
     }
     YLIMS = {
-        "qcrsfc": (-0.5, 0.5),
-        "highlow": (-0.5, 0.5),
+        "qcrsfc": (-1.0, 1.0),
+        "highlow": (-1.0, 1.0),
         "scrubbing": (-0.05, 0.05),
     }
 

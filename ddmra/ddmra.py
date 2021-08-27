@@ -22,6 +22,9 @@ def scrubbing_analysis(qc_values, group_timeseries, sort_idx, qc_thresh=0.2, per
         List of (T,) arrays
     group_timeseries : (N,) list
         List of (T, R) arrays
+    sort_idx : numpy.ndarray of shape (n_roi_pairs,)
+        Sorting index for upper triangle (not including self-self edges) of correlation matrix.
+        This will sort the 1D array by ascending physical distance of the ROI-ROI pairs.
     qc_thresh : float
         Threshold to apply to QC values for identifying bad volumes.
     perm : bool
@@ -39,11 +42,11 @@ def scrubbing_analysis(qc_values, group_timeseries, sort_idx, qc_thresh=0.2, per
     triu_idx = np.triu_indices(n_rois, k=1)
     n_pairs = len(triu_idx[0])
     n_subjects = len(group_timeseries)
-    delta_rs = np.zeros((n_subjects, n_pairs))
+    delta_zs = np.zeros((n_subjects, n_pairs))
     c = 0  # included subject counter
-    for subj in range(n_subjects):
-        ts_arr = group_timeseries[subj]
-        qc_arr = qc_values[subj]
+    for i_subj in range(n_subjects):
+        ts_arr = group_timeseries[i_subj]
+        qc_arr = qc_values[i_subj]
         keep_idx = qc_arr <= qc_thresh
 
         # Subjects with no timepoints excluded or with more than 50% excluded
@@ -53,21 +56,26 @@ def scrubbing_analysis(qc_values, group_timeseries, sort_idx, qc_thresh=0.2, per
             scrubbed_ts = ts_arr[:, keep_idx]
             raw_corrs = np.corrcoef(ts_arr)
             raw_corrs = raw_corrs[triu_idx]
+            raw_zs = np.arctanh(raw_corrs)
             scrubbed_corrs = np.corrcoef(scrubbed_ts)
             scrubbed_corrs = scrubbed_corrs[triu_idx]
-            delta_rs[c, :] = raw_corrs - scrubbed_corrs  # opposite of Power
+            scrubbed_zs = np.arctanh(scrubbed_corrs)
+            delta_zs[c, :] = raw_zs - scrubbed_zs  # opposite of Power
             c += 1
 
     if not perm:
         LGR.info(f"{c} of {n_subjects} subjects retained in scrubbing analysis")
 
-    delta_rs = delta_rs[:c, :]
-    mean_delta_r = np.mean(delta_rs, axis=0)
-    mean_delta_r = mean_delta_r[sort_idx]
-    return mean_delta_r
+    # Remove extra rows corresponding to bad subjects
+    delta_zs = delta_zs[:c, :]
+    # Average over subjects
+    mean_delta_z = np.mean(delta_zs, axis=0)
+    # Sort by ascending distance
+    mean_delta_z = mean_delta_z[sort_idx]
+    return mean_delta_z
 
 
-def highlow_analysis(mean_qcs, corr_mats, sort_idx):
+def highlow_analysis(mean_qcs, corr_mats):
     """Perform high-low motion analysis.
 
     Split the sample using a median split of the QC metric (generally mean FD).
@@ -78,27 +86,26 @@ def highlow_analysis(mean_qcs, corr_mats, sort_idx):
     Parameters
     ----------
     mean_qcs : numpy.ndarray of shape (n_subjects,)
+        QC measure (typically mean framewise displacement) across participants.
     corr_mats : numpy.ndarray of shape (n_subjects, n_roi_pairs)
-    sort_idx : numpy.ndarray of shape (n_roi_pairs,)
+        Z-transformed correlation coefficients for ROI-ROI pairs.
+        n_roi_pairs is the *unique* ROI-to-ROI edges, not including self-self edges.
+        These coefficients must be sorted according to ascending distance along the second axis.
     """
-    hm_idx = mean_qcs >= np.median(mean_qcs)
-    lm_idx = mean_qcs < np.median(mean_qcs)
-    hm_mean_corr = np.mean(corr_mats[hm_idx, :], axis=0)
-    lm_mean_corr = np.mean(corr_mats[lm_idx, :], axis=0)
-    hl_corr_diff = hm_mean_corr - lm_mean_corr
-    hl_corr_diff = hl_corr_diff[sort_idx]
+    highgroup_idx = mean_qcs >= np.median(mean_qcs)
+    lowgroup_idx = mean_qcs < np.median(mean_qcs)
+    highgroup_mean_z = np.mean(corr_mats[highgroup_idx, :], axis=0)
+    lowgroup_mean_z = np.mean(corr_mats[lowgroup_idx, :], axis=0)
+    hl_corr_diff = highgroup_mean_z - lowgroup_mean_z
     return hl_corr_diff
 
 
-def qcrsfc_analysis(mean_qcs, corr_mats, sort_idx):
+def qcrsfc_analysis(mean_qcs, corr_mats):
     """Perform quality-control resting-state functional connectivity analysis."""
     # Correlate each ROI pair's z-value against QC measure (usually FD) across subjects.
     qcrsfc_rs = fast_pearson(corr_mats.T, mean_qcs)
-
-    # Sort coefficients by distance
-    qcrsfc_rs = qcrsfc_rs[sort_idx]
-
-    return qcrsfc_rs
+    qcrsfc_zs = np.arctanh(qcrsfc_rs)
+    return qcrsfc_zs
 
 
 def scrubbing_null_distribution(
@@ -116,7 +123,7 @@ def scrubbing_null_distribution(
     perm_scrub_smoothing_curve = np.zeros((n_iters, len(smoothing_curve_distances)))
     for i_iter in range(n_iters):
         perm_qcs = [np.random.permutation(perm_qc) for perm_qc in qc_values]
-        perm_mean_delta_r = scrubbing_analysis(
+        perm_mean_delta_zs = scrubbing_analysis(
             perm_qcs,
             ts_all,
             sort_idx,
@@ -124,7 +131,7 @@ def scrubbing_null_distribution(
             perm=True,
         )
         perm_scrub_smoothing_curve[i_iter, :] = moving_average(
-            perm_mean_delta_r,
+            perm_mean_delta_zs,
             window,
         )[smoothing_curve_dist_idx]
 
@@ -135,7 +142,6 @@ def other_null_distributions(
     qc_values,
     corr_mats,
     smoothing_curve_distances,
-    sort_idx,
     smoothing_curve_dist_idx,
     qc_thresh,
     window,
@@ -152,14 +158,14 @@ def other_null_distributions(
         perm_mean_qcs = np.random.permutation(mean_qcs)
 
         # QC:RSFC analysis
-        perm_qcrsfc_rs = qcrsfc_analysis(perm_mean_qcs, corr_mats, sort_idx)
+        perm_qcrsfc_zs = qcrsfc_analysis(perm_mean_qcs, corr_mats)
         perm_qcrsfc_smoothing_curve[i_iter, :] = moving_average(
-            perm_qcrsfc_rs,
+            perm_qcrsfc_zs,
             window,
         )[smoothing_curve_dist_idx]
 
         # High-low analysis
-        perm_hl_diff = highlow_analysis(perm_mean_qcs, corr_mats, sort_idx)
+        perm_hl_diff = highlow_analysis(perm_mean_qcs, corr_mats)
         perm_hl_smoothing_curve[i_iter, :] = moving_average(
             perm_hl_diff,
             window,

@@ -23,6 +23,7 @@ def get_val(x_arr, y_arr, x_val):
     """
     if y_arr.ndim == 2:
         y_arr = y_arr.T
+
     assert x_arr.shape[0] == y_arr.shape[0]
 
     temp_idx = np.where(x_arr == x_val)[0]
@@ -31,6 +32,7 @@ def get_val(x_arr, y_arr, x_val):
             y_val = np.mean(y_arr[temp_idx, :], axis=0)
         else:
             y_val = np.mean(y_arr[temp_idx])
+
     else:
         val1 = x_arr[np.where(x_arr <= x_val)[0][-1]]
         val2 = x_arr[np.where(x_arr >= x_val)[0][0]]
@@ -44,6 +46,7 @@ def get_val(x_arr, y_arr, x_val):
                 y_val[i] = np.interp(xp=x_arr[temp_idx], fp=temp_y_arr[temp_idx], x=x_val)
         else:
             y_val = np.interp(xp=x_arr[temp_idx], fp=y_arr[temp_idx], x=x_val)
+
     return y_val
 
 
@@ -240,9 +243,16 @@ def assess_significance(curve, null_curves, distances, intercept_distance, v2):
     Returns
     -------
     p_inter : float
-        P-value for intercept.
+        P-value for intercept. Higher intercepts with lower p-values
+        indicate both focal and global effects of the QC metric on functional connectivity.
     p_slope : float
         P-value for slope.
+        Slope, in this case, is calculated as the intercept's value minus the second location's
+        value, so that negative slopes go *up* and positive slopes go *down*.
+        Higher slopes (i.e., those going down) with lower p-values
+        indicate focal effects of the QC metric on functional connectivity
+        (i.e., enhanced local connectivity and decrease long-distance connectivity due to the
+        QC measure).
     """
     assert curve.ndim == distances.ndim == 1
     assert null_curves.ndim == 2

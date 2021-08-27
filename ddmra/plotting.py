@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
-from .ddmra import assess_significance
+from .utils import assess_significance
 
 sns.set_style("white")
 
@@ -53,7 +53,7 @@ def plot_analysis(
     assert data_points.ndim == distances.ndim == smoothing_curve.ndim == curve_distances.ndim == 1
     assert perm_smoothing_curves.ndim == 2
     assert data_points.shape == distances.shape
-    assert smoothing_curve.shape == curve_distances.shape == perm_smoothing_curves.shape[1]
+    assert smoothing_curve.shape[0] == curve_distances.shape[0] == perm_smoothing_curves.shape[1]
 
     if not ax:
         fig, ax = plt.subplots(figsize=(16, 10))
@@ -70,12 +70,12 @@ def plot_analysis(
     )
 
     sns.regplot(
-        distances,
-        data_points,
+        x=distances,
+        y=data_points,
         ax=ax,
         scatter=True,
         fit_reg=False,
-        scatter_kws={"color": "red", "s": 2.0, "alpha": 1},
+        scatter_kws={"color": "red", "s": 5.0, "alpha": 1},
     )
     ax.axhline(0, xmin=0, xmax=np.max(distances) + 100, color="black", linewidth=3)
 
