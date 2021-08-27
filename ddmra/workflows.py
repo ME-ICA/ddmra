@@ -197,18 +197,13 @@ def run_analyses(
         n_iters=n_iters,
     )
 
-    np.savetxt(
-        op.join(out_dir, "qcrsfc_analysis_null_smoothing_curves.txt"),
-        perm_qcrsfc_smoothing_curves,
+    np.savez_compressed(
+        op.join(out_dir, "null_smoothing_curves.npz"),
+        qcrsfc=perm_qcrsfc_smoothing_curves,
+        highlow=perm_hl_smoothing_curves,
+        scrubbing=perm_scrub_smoothing_curves,
     )
-    np.savetxt(
-        op.join(out_dir, "highlow_analysis_null_smoothing_curves.txt"),
-        perm_hl_smoothing_curves,
-    )
-    np.savetxt(
-        op.join(out_dir, "scrubbing_analysis_null_smoothing_curves.txt"),
-        perm_scrub_smoothing_curves,
-    )
+
     del perm_qcrsfc_smoothing_curves, perm_hl_smoothing_curves, perm_scrub_smoothing_curves
 
     plotting.plot_results(out_dir)

@@ -125,25 +125,20 @@ def plot_results(in_dir):
     }
     analysis_values = pd.read_table(op.join(in_dir, "analysis_values.tsv.gz"))
     smoothing_curves = pd.read_table(op.join(in_dir, "smoothing_curves.tsv.gz"))
+    null_curves = np.load(op.join(in_dir, "null_smoothing_curves.npz"))
 
     fig, axes = plt.subplots(figsize=(8, 24), nrows=len(METRIC_LABELS))
 
     for i_analysis, (analysis_type, label) in enumerate(METRIC_LABELS.items()):
         values = analysis_values[analysis_type].values
         smoothing_curve = smoothing_curves[analysis_type].values
-        perm_smoothing_curves = np.loadtxt(
-            op.join(
-                in_dir,
-                f"{analysis_type}_analysis_null_smoothing_curves.txt",
-            )
-        )
 
         fig, axes[i_analysis] = plot_analysis(
             values,
             analysis_values["distance"],
             smoothing_curve,
             smoothing_curves["distance"],
-            perm_smoothing_curves,
+            null_curves[analysis_type],
             n_lines=50,
             ylim=YLIMS[analysis_type],
             metric_name=label,
@@ -151,4 +146,4 @@ def plot_results(in_dir):
             ax=axes[i_analysis],
         )
 
-    fig.savefig(op.join(in_dir, "analysis_results.png"), dpi=400)
+    fig.savefig(op.join(in_dir, "analysis_results.png"), dpi=100)
