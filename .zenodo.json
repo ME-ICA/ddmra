@@ -10,6 +10,6 @@
         "neuroimaging",
         "fMRI"
     ],
-    "license": "Apache 2.0",
+    "license": "LGPL-2.1",
     "upload_type": "software"
 }
