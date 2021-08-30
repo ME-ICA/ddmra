@@ -50,11 +50,12 @@ def run_analyses(
         Has four columns: distance, qcrsfc, scrubbing, and highlow.
     - ``smoothing_curves.tsv.gz``: Smoothing curve information for analyses.
         Has four columns: distance, qcrsfc, scrubbing, and highlow.
-    - ``[analysis]_analysis_null_smoothing_curves.txt``:
+    - ``null_smoothing_curves.npz``:
         Null smoothing curves from each analysis.
-        Contains 2D array, where number of columns is same
+        Contains three 2D arrays, where number of columns is same
         size and order as distance column in ``smoothing_curves.tsv.gz``
         and number of rows is number of iterations for permutation analysis.
+        The three arrays' keys are 'qcrsfc', 'highlow', and 'scrubbing'.
     - ``[analysis]_analysis.png``: Figure for each analysis.
     """
     makedirs(out_dir, exist_ok=True)
@@ -82,8 +83,8 @@ def run_analyses(
     distances = distances[triu_idx]
 
     # Sorting index for distances
-    sort_idx = distances.argsort()
-    distances = distances[sort_idx]
+    edge_sorting_idx = distances.argsort()
+    distances = distances[edge_sorting_idx]
     unique_dists_idx = np.array([np.where(distances == i)[0][0] for i in np.unique(distances)])
 
     LGR.info("Creating masker")
@@ -119,7 +120,7 @@ def run_analyses(
         ts_all.append(raw_ts)
         raw_corrs = np.corrcoef(raw_ts)
         raw_corrs = raw_corrs[triu_idx]
-        raw_corrs = raw_corrs[sort_idx]  # Sort from close to far ROI pairs
+        raw_corrs = raw_corrs[edge_sorting_idx]  # Sort from close to far ROI pairs
         z_corr_mats[i_subj, :] = np.arctanh(raw_corrs)
 
     del (raw_corrs, raw_ts, spheres_masker, atlas, coords)
@@ -136,13 +137,14 @@ def run_analyses(
 
     # Quick interlude to help reduce arrays
     # Identify unique distances that don't have NaNs in the smoothing curve
-    smoothing_curve_dist_idx = np.intersect1d(
-        np.where(~np.isnan(qcrsfc_smoothing_curve))[0], unique_dists_idx
+    smc_sorting_idx = np.intersect1d(
+        np.where(~np.isnan(qcrsfc_smoothing_curve))[0],
+        unique_dists_idx,
     )
-    smoothing_curve_distances = distances[smoothing_curve_dist_idx]
+    smoothing_curve_distances = distances[smc_sorting_idx]
     smoothing_curves["distance"] = smoothing_curve_distances
 
-    qcrsfc_smoothing_curve = qcrsfc_smoothing_curve[smoothing_curve_dist_idx]
+    qcrsfc_smoothing_curve = qcrsfc_smoothing_curve[smc_sorting_idx]
     smoothing_curves["qcrsfc"] = qcrsfc_smoothing_curve
     del qcrsfc_values, qcrsfc_smoothing_curve
 
@@ -150,15 +152,15 @@ def run_analyses(
     LGR.info("Performing high-low motion analysis")
     highlow_values = analysis.highlow_analysis(mean_qc, z_corr_mats)
     analysis_values["highlow"] = highlow_values
-    hl_smoothing_curve = utils.moving_average(highlow_values, window)[smoothing_curve_dist_idx]
+    hl_smoothing_curve = utils.moving_average(highlow_values, window)[smc_sorting_idx]
     smoothing_curves["highlow"] = hl_smoothing_curve
     del highlow_values, hl_smoothing_curve
 
     # Scrubbing analysis
     LGR.info("Performing scrubbing analysis")
-    scrub_values = analysis.scrubbing_analysis(qc, ts_all, sort_idx, qc_thresh, perm=False)
+    scrub_values = analysis.scrubbing_analysis(qc, ts_all, edge_sorting_idx, qc_thresh, perm=False)
     analysis_values["scrubbing"] = scrub_values
-    scrub_smoothing_curve = utils.moving_average(scrub_values, window)[smoothing_curve_dist_idx]
+    scrub_smoothing_curve = utils.moving_average(scrub_values, window)[smc_sorting_idx]
     smoothing_curves["scrubbing"] = scrub_smoothing_curve
     del scrub_values, scrub_smoothing_curve
 
@@ -177,34 +179,31 @@ def run_analyses(
 
     # Null distributions
     LGR.info("Building null distributions with permutations")
-    perm_qcrsfc_smoothing_curves, perm_hl_smoothing_curves = analysis.other_null_distributions(
+    qcrsfc_null_smoothing_curves, hl_null_smoothing_curves = analysis.other_null_distributions(
         qc,
         z_corr_mats,
-        smoothing_curve_distances,
-        smoothing_curve_dist_idx,
-        qc_thresh=qc_thresh,
+        smc_sorting_idx,
         window=window,
         n_iters=n_iters,
     )
-    perm_scrub_smoothing_curves = analysis.scrubbing_null_distribution(
+    scrub_null_smoothing_curves = analysis.scrubbing_null_distribution(
         qc,
         ts_all,
-        smoothing_curve_distances,
-        sort_idx,
-        smoothing_curve_dist_idx,
-        qc_thresh=qc_thresh,
+        qc_thresh,
+        edge_sorting_idx,
+        smc_sorting_idx,
         window=window,
         n_iters=n_iters,
     )
 
     np.savez_compressed(
         op.join(out_dir, "null_smoothing_curves.npz"),
-        qcrsfc=perm_qcrsfc_smoothing_curves,
-        highlow=perm_hl_smoothing_curves,
-        scrubbing=perm_scrub_smoothing_curves,
+        qcrsfc=qcrsfc_null_smoothing_curves,
+        highlow=hl_null_smoothing_curves,
+        scrubbing=scrub_null_smoothing_curves,
     )
 
-    del perm_qcrsfc_smoothing_curves, perm_hl_smoothing_curves, perm_scrub_smoothing_curves
+    del qcrsfc_null_smoothing_curves, hl_null_smoothing_curves, scrub_null_smoothing_curves
 
     plotting.plot_results(out_dir)
 

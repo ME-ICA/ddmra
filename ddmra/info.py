@@ -35,11 +35,11 @@ longdesc = readme_path.open().read()
 AUTHOR = "Taylor Salo"
 COPYRIGHT = "Copyright 2021, Taylor Salo"
 CREDITS = author_names
-LICENSE = "GPL-2.0"
+LICENSE = "LGPL 2.1"
 MAINTAINER = "Taylor Salo"
 EMAIL = "tsalo006@fiu.edu"
 STATUS = "Prototype"
-URL = "https://github.com/tsalo/ddmra"
+URL = "https://github.com/ME-ICA/ddmra"
 PACKAGENAME = "ddmra"
 DESCRIPTION = "A Python package for distance-dependent motion-related artifact (DDMRA) analysis."
 LONGDESC = longdesc
@@ -71,24 +71,19 @@ EXTRA_REQUIRES = {
     "doc": [
         "sphinx>=1.5.3",
         "sphinx_rtd_theme",
-        "sphinx-argparse",
     ],
     "tests": TESTS_REQUIRES,
     "duecredit": ["duecredit"],
 }
 
-ENTRY_POINTS = {
-    "console_scripts": [
-        "godec=godec.workflows.godec:_main",
-    ]
-}
+ENTRY_POINTS = {}
 
 # Enable a handle to install all extra dependencies at once
 EXTRA_REQUIRES["all"] = list(set([v for deps in EXTRA_REQUIRES.values() for v in deps]))
 
 # Supported Python versions using PEP 440 version specifiers
 # Should match the same set of Python versions as classifiers
-PYTHON_REQUIRES = ">=3.5"
+PYTHON_REQUIRES = ">=3.6"
 
 # Package classifiers
 CLASSIFIERS = [

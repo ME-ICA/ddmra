@@ -22,9 +22,9 @@ def plot_analysis(
     distances,
     smoothing_curve,
     curve_distances,
-    perm_smoothing_curves,
+    null_smoothing_curves,
     n_lines=50,
-    metric_name="QC:RSFC r\n(QC = mean FD)",
+    metric_name=None,
     ylim=(-0.5, 0.5),
     fig=None,
     ax=None,
@@ -33,40 +33,48 @@ def plot_analysis(
 
     Parameters
     ----------
-    data_points : numpy.ndarray of shape (D,)
-        DDMRA-metric values for all ROI-to-ROI edges.
-    distances : numpy.ndarray of shape (D,)
+    data_points : numpy.ndarray of shape (n_edges,)
+        DDMRA-metric values for all unique ROI-to-ROI edges, not including self-self edges.
+    distances : numpy.ndarray of shape (n_edges,)
         All distances associated with data in data_points, in mm.
-    smoothing_curve : numpy.ndarray of shape (U,)
-        Smoothing curve of data points, with U points.
-        U being unique data points.
-    curve_distances : numpy.ndarray of shape (U,)
-    perm_smoothing_curves : numpy.ndarray of shape (P, U)
+    smoothing_curve : numpy.ndarray of shape (n_unique_edge_distances,)
+        Smoothing curve of data points, produced using a moving average.
+    curve_distances : numpy.ndarray of shape (n_unique_edge_distances,)
+        Edge distances, in mm, of data points in smoothing curve.
+    null_smoothing_curves : numpy.ndarray of shape (n_iters, n_unique_edge_distances)
+        Smoothing curves for all permutations, to be used as a null distribution.
     n_lines : int, optional
-    metric_name : str, optional
+        Number of null smoothing curves to plot in the figure. Default is 50.
+    metric_name : None or str, optional
+        Label for the Y-axis of the figure, indicating the analysis' metric's name.
     ylim : tuple, optional
+        Y-limits.
     fig : None or matplotlib.pyplot.Figure, optional
+        Figure object.
     ax : None or matplotlib.pyplot.Axes, optional
+        Axes object.
 
     Returns
     -------
     fig : matplotlib.pyplot.Figure
+        Updated Figure object.
     ax : matplotlib.pyplot.Axes
+        Updated Axes object.
     """
     assert data_points.ndim == distances.ndim == smoothing_curve.ndim == curve_distances.ndim == 1
-    assert perm_smoothing_curves.ndim == 2
+    assert null_smoothing_curves.ndim == 2
     assert data_points.shape == distances.shape
-    assert smoothing_curve.shape[0] == curve_distances.shape[0] == perm_smoothing_curves.shape[1]
+    assert smoothing_curve.shape[0] == curve_distances.shape[0] == null_smoothing_curves.shape[1]
 
     if not ax:
         fig, ax = plt.subplots(figsize=(16, 10))
 
     V1, V2 = 35, 100  # distances to evaluate
-    n_lines = np.minimum(n_lines, perm_smoothing_curves.shape[0])
+    n_lines = np.minimum(n_lines, null_smoothing_curves.shape[0])
 
     p_intercept, p_slope = assess_significance(
         smoothing_curve,
-        perm_smoothing_curves,
+        null_smoothing_curves,
         curve_distances,
         V1,
         V2,
@@ -83,7 +91,7 @@ def plot_analysis(
     ax.axhline(0, xmin=0, xmax=np.max(distances) + 100, color="black", linewidth=3)
 
     for i_line in range(n_lines):
-        ax.plot(curve_distances, perm_smoothing_curves[i_line, :], color="black")
+        ax.plot(curve_distances, null_smoothing_curves[i_line, :], color="black")
 
     ax.plot(curve_distances, smoothing_curve, color="white")
 
@@ -113,6 +121,16 @@ def plot_analysis(
 
 
 def plot_results(in_dir):
+    """Plot the results for all three analyses from a workflow run and save to a file.
+
+    This function leverages the output file structure of :func:`workflows.run_analyses`.
+    It writes out an image (analysis_results.png) to the output directory.
+
+    Parameters
+    ----------
+    in_dir : str
+        Path to the output directory of a ``run_analyses`` run.
+    """
     METRIC_LABELS = {
         "qcrsfc": r"QC:RSFC $z_{r}$" + "\n(QC = mean FD)",
         "highlow": "High-low motion\n" + r"${\Delta}z_{r}$",

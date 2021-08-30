@@ -13,7 +13,6 @@ def respiration_iirnotch(TR_in_sec, bpm_min=18.582, bpm_max=25.7263):
     Takes in the TR (optional min/max breaths-per-min, bpm_min, bpm_max).
     Returns the parameters for IIR Notch filter.
     """
-
     fs = 1.0 / TR_in_sec  # Sampling frequency (Hz)
     fn = fs / 2.0  # Nyquist frequency (Hz)
 
@@ -46,6 +45,8 @@ def filter_earl(motpars, t_r, radius=50):
         three are rotations. Rotations in degrees.
     t_r : :obj:`float`
         Repetition time in seconds.
+    radius : :obj:`float`, optional
+        Head radius for conversion of rotation units to distance at the edge of the brain.
 
     Returns
     -------
