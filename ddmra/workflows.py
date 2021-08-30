@@ -19,6 +19,7 @@ def run_analyses(
     out_dir=".",
     confounds=None,
     n_iters=10000,
+    n_jobs=1,
     qc_thresh=0.2,
     window=1000,
 ):
@@ -37,6 +38,8 @@ def run_analyses(
         Default is None (no confounds are removed).
     n_iters : int, optional
         Number of iterations to run to generate null distributions. Default is 10000.
+    n_jobs : int, optional
+        The number of CPUs to use to do the computation. -1 means 'all CPUs'. Default is 1.
     qc_thresh : float, optional
         Threshold for QC metric used in scrubbing analysis. Default is 0.2 (for FD).
     window : int, optional
@@ -85,7 +88,6 @@ def run_analyses(
     # Sorting index for distances
     edge_sorting_idx = distances.argsort()
     distances = distances[edge_sorting_idx]
-    unique_dists_idx = np.array([np.where(distances == i)[0][0] for i in np.unique(distances)])
 
     LGR.info("Creating masker")
     spheres_masker = input_data.NiftiSpheresMasker(
@@ -125,53 +127,64 @@ def run_analyses(
 
     del (raw_corrs, raw_ts, spheres_masker, atlas, coords)
 
-    smoothing_curves = pd.DataFrame(columns=["distance", "qcrsfc", "highlow", "scrubbing"])
-    analysis_values = pd.DataFrame(columns=["distance", "qcrsfc", "highlow", "scrubbing"])
-    analysis_values["distance"] = distances
+    analysis_values = pd.DataFrame(columns=["qcrsfc", "highlow", "scrubbing"], index=distances)
+    analysis_values.index.name = "distance"
 
     # QC:RSFC r analysis
     LGR.info("Performing QC:RSFC analysis")
     qcrsfc_values = analysis.qcrsfc_analysis(mean_qc, z_corr_mats)
     analysis_values["qcrsfc"] = qcrsfc_values
     qcrsfc_smoothing_curve = utils.moving_average(qcrsfc_values, window)
-
-    # Quick interlude to help reduce arrays
-    # Identify unique distances that don't have NaNs in the smoothing curve
-    smc_sorting_idx = np.intersect1d(
-        np.where(~np.isnan(qcrsfc_smoothing_curve))[0],
-        unique_dists_idx,
+    qcrsfc_smoothing_curve, smoothing_curve_distances = utils.average_across_distances(
+        qcrsfc_smoothing_curve,
+        distances,
     )
-    smoothing_curve_distances = distances[smc_sorting_idx]
-    smoothing_curves["distance"] = smoothing_curve_distances
 
-    qcrsfc_smoothing_curve = qcrsfc_smoothing_curve[smc_sorting_idx]
-    smoothing_curves["qcrsfc"] = qcrsfc_smoothing_curve
+    # Quick interlude to create the smoothing_curves DataFrame
+    smoothing_curves = pd.DataFrame(
+        columns=["qcrsfc", "highlow", "scrubbing"],
+        index=smoothing_curve_distances,
+    )
+    smoothing_curves.index.name = "distance"
+
+    smoothing_curves.loc[smoothing_curve_distances, "qcrsfc"] = qcrsfc_smoothing_curve
     del qcrsfc_values, qcrsfc_smoothing_curve
 
     # High-low motion analysis
     LGR.info("Performing high-low motion analysis")
     highlow_values = analysis.highlow_analysis(mean_qc, z_corr_mats)
     analysis_values["highlow"] = highlow_values
-    hl_smoothing_curve = utils.moving_average(highlow_values, window)[smc_sorting_idx]
-    smoothing_curves["highlow"] = hl_smoothing_curve
+    hl_smoothing_curve = utils.moving_average(highlow_values, window)
+    hl_smoothing_curve, smoothing_curve_distances = utils.average_across_distances(
+        hl_smoothing_curve,
+        distances,
+    )
+    smoothing_curves.loc[smoothing_curve_distances, "highlow"] = hl_smoothing_curve
     del highlow_values, hl_smoothing_curve
 
     # Scrubbing analysis
     LGR.info("Performing scrubbing analysis")
     scrub_values = analysis.scrubbing_analysis(qc, ts_all, edge_sorting_idx, qc_thresh, perm=False)
     analysis_values["scrubbing"] = scrub_values
-    scrub_smoothing_curve = utils.moving_average(scrub_values, window)[smc_sorting_idx]
-    smoothing_curves["scrubbing"] = scrub_smoothing_curve
+    scrub_smoothing_curve = utils.moving_average(scrub_values, window)
+    scrub_smoothing_curve, smoothing_curve_distances = utils.average_across_distances(
+        scrub_smoothing_curve,
+        distances,
+    )
+    smoothing_curves.loc[smoothing_curve_distances, "scrubbing"] = scrub_smoothing_curve
     del scrub_values, scrub_smoothing_curve
 
-    smoothing_curves.to_csv(
-        op.join(out_dir, "smoothing_curves.tsv.gz"),
+    analysis_values.reset_index(inplace=True)
+    smoothing_curves.reset_index(inplace=True)
+
+    analysis_values.to_csv(
+        op.join(out_dir, "analysis_values.tsv.gz"),
         sep="\t",
         line_terminator="\n",
         index=False,
     )
-    analysis_values.to_csv(
-        op.join(out_dir, "analysis_values.tsv.gz"),
+    smoothing_curves.to_csv(
+        op.join(out_dir, "smoothing_curves.tsv.gz"),
         sep="\t",
         line_terminator="\n",
         index=False,
@@ -182,18 +195,20 @@ def run_analyses(
     qcrsfc_null_smoothing_curves, hl_null_smoothing_curves = analysis.other_null_distributions(
         qc,
         z_corr_mats,
-        smc_sorting_idx,
+        distances,
         window=window,
         n_iters=n_iters,
+        n_jobs=n_jobs,
     )
     scrub_null_smoothing_curves = analysis.scrubbing_null_distribution(
         qc,
         ts_all,
+        distances,
         qc_thresh,
         edge_sorting_idx,
-        smc_sorting_idx,
         window=window,
         n_iters=n_iters,
+        n_jobs=n_jobs,
     )
 
     np.savez_compressed(

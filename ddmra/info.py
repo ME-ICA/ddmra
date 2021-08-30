@@ -49,6 +49,7 @@ DOWNLOAD_URL = "https://github.com/tsalo/{name}/archive/{ver}.tar.gz".format(
 )
 
 REQUIRES = [
+    "joblib",
     "nibabel",
     "nilearn",
     "numpy>=1.15",

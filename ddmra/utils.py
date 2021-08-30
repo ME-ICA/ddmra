@@ -219,11 +219,25 @@ def moving_average(values, window):
         the mean of values[750:1250]. Positions at the beginning and end will
         be NaNs.
     """
-    weights = np.repeat(1.0, window) / window
+    assert window % 2 == 0, "Window must be divisible by 2."
+
+    weights = np.ones(window) / window
     sma = np.convolve(values, weights, "valid")
-    buff = np.zeros(int(window / 2)) * np.nan
-    sma = np.hstack((buff, sma, buff))[:-1]
+    buffer = np.full(shape=int(window / 2), fill_value=np.nan)
+    sma = np.hstack((buffer, sma, buffer))[:-1]
+
     return sma
+
+
+def average_across_distances(values, distances):
+    nonnan_idx = np.where(~np.isnan(values))[0]
+    unique_retained_distances, retained_distance_idxs = np.unique(
+        distances[nonnan_idx],
+        return_inverse=True,
+    )
+    distance_val_sums = np.bincount(retained_distance_idxs, values[nonnan_idx])
+    distance_val_means = distance_val_sums / np.bincount(retained_distance_idxs)
+    return distance_val_means, unique_retained_distances
 
 
 def assess_significance(curve, null_curves, distances, intercept_distance, v2):
