@@ -54,6 +54,7 @@ REQUIRES = [
     "nilearn",
     "numpy>=1.15",
     "scipy>=1.3.3",
+    "seaborn",
 ]
 
 TESTS_REQUIRES = [
