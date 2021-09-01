@@ -22,7 +22,7 @@ The ``ddmra`` package is a Python package for running DDMRA quality control anal
    :target: https://circleci.com/gh/ME-ICA/ddmra
    :alt: CircleCI
 
-.. image:: http://img.shields.io/badge/License-LGPL%202.0-blue.svg
+.. image:: http://img.shields.io/badge/License-LGPL%202.1-blue.svg
    :target: https://opensource.org/licenses/LGPL-2.1
    :alt: License
 
