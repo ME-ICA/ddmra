@@ -26,7 +26,7 @@ jobs:
             else
                 conda create -n py36_env python=3.6 numpy -yq
                 source activate py36_env
-                pip install -e .[tests,doc]
+                pip install -e .[tests]
             fi
             python setup.py install --user
       - run:
@@ -56,7 +56,7 @@ jobs:
             else
                 conda create -n py37_env python=3.7 numpy -yq
                 source activate py37_env
-                pip install -e .[tests,doc]
+                pip install -e .[tests]
             fi
             python setup.py install --user
       - run:
@@ -87,7 +87,7 @@ jobs:
                 conda create -n py38_env python=3.8 numpy -yq
                 source activate py38_env
                 pip install pip -U
-                pip install -e .[tests,doc]
+                pip install -e .[tests]
             fi
             python setup.py install --user
       - run:
@@ -109,7 +109,7 @@ jobs:
           paths:
               - src/ddmra
       - restore_cache:  # ensure this step occurs *before* installing dependencies
-          key: deps9-{{ checksum "ddmra/info.py" }}-{{ checksum "setup.py" }}
+          key: deps1-{{ checksum "ddmra/info.py" }}-{{ checksum "setup.py" }}
       - run:  # will overwrite ddmra installation each time
           name: Generate environment
           command:  |
@@ -123,7 +123,7 @@ jobs:
             fi
             python setup.py install --user
       - save_cache:  # environment cache tied to requirements
-          key: deps9-{{ checksum "ddmra/info.py" }}-{{ checksum "setup.py" }}
+          key: deps1-{{ checksum "ddmra/info.py" }}-{{ checksum "setup.py" }}
           paths:
             - "/opt/conda/envs/py39_env"
 
@@ -135,7 +135,7 @@ jobs:
       - attach_workspace:  # get ddmra
           at: /tmp
       - restore_cache:  # load environment
-          key: deps9-{{ checksum "ddmra/info.py" }}-{{ checksum "setup.py" }}
+          key: deps1-{{ checksum "ddmra/info.py" }}-{{ checksum "setup.py" }}
       - run:
           name: Run tests and compile coverage
           command:  |
@@ -155,7 +155,7 @@ jobs:
       - attach_workspace:  # get ddmra
           at: /tmp
       - restore_cache:  # load environment
-          key: deps9-{{ checksum "ddmra/info.py" }}-{{ checksum "setup.py" }}
+          key: deps1-{{ checksum "ddmra/info.py" }}-{{ checksum "setup.py" }}
       - run:
           name: Build documentation
           command: |
@@ -175,7 +175,7 @@ jobs:
       - attach_workspace:  # get ddmra
           at: /tmp
       - restore_cache:  # load environment
-          key: deps9-{{ checksum "ddmra/info.py" }}-{{ checksum "setup.py" }}
+          key: deps1-{{ checksum "ddmra/info.py" }}-{{ checksum "setup.py" }}
       - run:
           name: Linting
           command:  |
