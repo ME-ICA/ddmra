@@ -2,7 +2,7 @@
 
 [![Latest Version](https://img.shields.io/pypi/v/ddmra.svg)](https://pypi.python.org/pypi/ddmra/)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/ddmra.svg)](https://pypi.python.org/pypi/ddmra/)
-[![DOI](https://zenodo.org/badge/5363660.svg)](https://zenodo.org/badge/latestdoi/5363660)
+[![DOI](https://zenodo.org/badge/150098665.svg)](https://zenodo.org/badge/latestdoi/150098665)
 [![License](https://img.shields.io/badge/License-LGPL%202.1-blue.svg)](https://opensource.org/licenses/LGPL-2.1)
 [![CircleCI](https://circleci.com/gh/ME-ICA/ddmra.svg?style=shield)](https://circleci.com/gh/ME-ICA/ddmra)
 [![Documentation Status](https://readthedocs.org/projects/ddmra/badge/?version=latest)](http://ddmra.readthedocs.io/en/latest/?badge=latest)

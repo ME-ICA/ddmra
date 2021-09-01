@@ -14,8 +14,8 @@ The ``ddmra`` package is a Python package for running DDMRA quality control anal
    :target: https://pypi.python.org/pypi/ddmra/
    :alt: PyPI - Python Version
 
-.. image:: https://zenodo.org/badge/5363660.svg
-   :target: https://zenodo.org/badge/latestdoi/5363660
+.. image:: https://zenodo.org/badge/150098665.svg
+   :target: https://zenodo.org/badge/latestdoi/150098665
    :alt: DOI
 
 .. image:: https://circleci.com/gh/ME-ICA/ddmra.svg?style=shield
