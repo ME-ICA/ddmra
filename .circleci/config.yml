@@ -26,7 +26,7 @@ jobs:
             else
                 conda create -n py36_env python=3.6 numpy -yq
                 source activate py36_env
-                pip install -e .[tests,docs]
+                pip install -e .[tests,doc]
             fi
             python setup.py install --user
       - run:
@@ -56,7 +56,7 @@ jobs:
             else
                 conda create -n py37_env python=3.7 numpy -yq
                 source activate py37_env
-                pip install -e .[tests,docs]
+                pip install -e .[tests,doc]
             fi
             python setup.py install --user
       - run:
@@ -87,7 +87,7 @@ jobs:
                 conda create -n py38_env python=3.8 numpy -yq
                 source activate py38_env
                 pip install pip -U
-                pip install -e .[tests,docs]
+                pip install -e .[tests,doc]
             fi
             python setup.py install --user
       - run:
@@ -119,7 +119,7 @@ jobs:
             else
                 conda create -n py39_env python=3.9 numpy -yq
                 source activate py39_env
-                pip install -e .[tests,docs]
+                pip install -e .[tests,doc]
             fi
             python setup.py install --user
       - save_cache:  # environment cache tied to requirements
