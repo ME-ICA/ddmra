@@ -44,7 +44,7 @@ PACKAGENAME = "ddmra"
 DESCRIPTION = "A Python package for distance-dependent motion-related artifact (DDMRA) analysis."
 LONGDESC = longdesc
 
-DOWNLOAD_URL = "https://github.com/tsalo/{name}/archive/{ver}.tar.gz".format(
+DOWNLOAD_URL = "https://github.com/ME-ICA/{name}/archive/{ver}.tar.gz".format(
     name=PACKAGENAME, ver=VERSION
 )
 

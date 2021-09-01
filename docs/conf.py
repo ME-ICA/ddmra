@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
-# tedana documentation build configuration file, created by
+# ddmra documentation build configuration file, created by
 # sphinx-quickstart
 #
 # This file is execfile()d with the current directory set to its
