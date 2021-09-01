@@ -161,7 +161,7 @@ jobs:
           command: |
             source activate py39_env
             apt-get update
-            apt-get install -yqq make
+            apt-get install -yqq make pandoc
             make -C docs html
           no_output_timeout: 30m
       - store_artifacts:
