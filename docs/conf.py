@@ -55,7 +55,6 @@ extensions = [
     "sphinx.ext.linkcode",
     "sphinx.ext.napoleon",
     "sphinx.ext.todo",
-    "sphinxarg.ext",
 ]
 
 if LooseVersion(sphinx.__version__) < LooseVersion("1.4"):
