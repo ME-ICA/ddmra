@@ -64,7 +64,6 @@ TESTS_REQUIRES = [
     "flake8-isort",
     "pytest",
     "pytest-cov",
-    "requests",
 ]
 
 EXTRA_REQUIRES = {
