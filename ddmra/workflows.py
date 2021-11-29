@@ -121,6 +121,7 @@ def run_analyses(
 
         ts_all.append(raw_ts)
         raw_corrs = np.corrcoef(raw_ts)
+        assert not np.any(np.isnan(raw_corrs))
         raw_corrs = raw_corrs[triu_idx]
         raw_corrs = raw_corrs[edge_sorting_idx]  # Sort from close to far ROI pairs
         z_corr_mats[i_subj, :] = np.arctanh(raw_corrs)
