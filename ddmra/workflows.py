@@ -119,9 +119,19 @@ def run_analyses(
 
         assert raw_ts.shape[0] == n_rois
 
+        if np.any(np.isnan(raw_ts)):
+            raise ValueError(f"Time series of {files[i_subj]} contains NaNs")
+
+        for i, sub_raw_ts in enumerate(raw_ts):
+            sub_variance = np.var(sub_raw_ts)
+            if sub_variance == 0.0:
+                raise ValueError(
+                    f"ROI {i} with var={sub_variance}, correlation coefficients for"
+                    f" {files[i_subj]} will be replaced by NaNs"
+                )
+
         ts_all.append(raw_ts)
         raw_corrs = np.corrcoef(raw_ts)
-        assert not np.any(np.isnan(raw_corrs))
         raw_corrs = raw_corrs[triu_idx]
         raw_corrs = raw_corrs[edge_sorting_idx]  # Sort from close to far ROI pairs
         z_corr_mats[i_subj, :] = np.arctanh(raw_corrs)
