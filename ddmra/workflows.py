@@ -122,13 +122,10 @@ def run_analyses(
         if np.any(np.isnan(raw_ts)):
             raise ValueError(f"Time series of {files[i_subj]} contains NaNs")
 
-        for i, sub_raw_ts in enumerate(raw_ts):
-            sub_variance = np.var(sub_raw_ts)
-            if sub_variance == 0.0:
-                raise ValueError(
-                    f"ROI {i} with var={sub_variance}, correlation coefficients for"
-                    f" {files[i_subj]} will be replaced by NaNs"
-                )
+        roi_variances = np.var(raw_ts, axis=0)
+        if any(roi_variances == 0):
+            bad_rois = np.where(roi_variances == 0)[0]
+            raise ValueError(f"ROI(s) {bad_rois} for {files[i_subj]} have variance of 0.")
 
         ts_all.append(raw_ts)
         raw_corrs = np.corrcoef(raw_ts)
