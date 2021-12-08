@@ -122,7 +122,7 @@ def run_analyses(
         if np.any(np.isnan(raw_ts)):
             raise ValueError(f"Time series of {files[i_subj]} contains NaNs")
 
-        roi_variances = np.var(raw_ts, axis=0)
+        roi_variances = np.var(raw_ts, axis=1)
         if any(roi_variances == 0):
             bad_rois = np.where(roi_variances == 0)[0]
             raise ValueError(f"ROI(s) {bad_rois} for {files[i_subj]} have variance of 0.")
