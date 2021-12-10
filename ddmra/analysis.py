@@ -42,6 +42,7 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
     Notes
     -----
     The basic process for the scrubbing analysis is:
+
     1. Exclude any subjects with more than 50% excluded volumes or 0% excluded volumes.
     2. For each subject, correlate each ROI's time series with every other ROI's
        time series to produce standard correlation matrix.
@@ -112,6 +113,7 @@ def highlow_analysis(mean_qcs, corr_mats):
     Notes
     -----
     The basic process for the high-low analysis is:
+
     1. Average QC values within each participant.
     2. Split the participants into high-QC and low-QC groups using a median split.
     3. Calculate the average z-transformed correlation coefficient for each group.
@@ -145,6 +147,7 @@ def qcrsfc_analysis(mean_qcs, corr_mats):
     Notes
     -----
     The basic process for the QC:RSFC analysis is:
+
     1. Average QC values within each participant.
     2. Correlate the mean QC values with z-transformed correlation coefficients
        across participants, for each ROI-ROI pair.
