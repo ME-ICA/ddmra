@@ -94,7 +94,7 @@ def run_analyses(
         seeds=coords,
         radius=5.0,
         t_r=None,
-        smoothing_fwhm=4.0,
+        smoothing_fwhm=None,
         detrend=False,
         standardize=False,
         low_pass=None,
@@ -111,7 +111,9 @@ def run_analyses(
     if confounds:
         LGR.info("Regressing confounds out of data.")
 
+    subject_counter = 0
     for i_subj in range(n_subjects):
+        skip_subject = False
         if confounds:
             raw_ts = spheres_masker.fit_transform(files[i_subj], confounds=confounds[i_subj]).T
         else:
@@ -120,20 +122,34 @@ def run_analyses(
         assert raw_ts.shape[0] == n_rois
 
         if np.any(np.isnan(raw_ts)):
-            raise ValueError(f"Time series of {files[i_subj]} contains NaNs")
+            LGR.warning(f"Time series of {files[i_subj]} contains NaNs. Dropping from analysis.")
+            skip_subject = True
 
         roi_variances = np.var(raw_ts, axis=1)
         if any(roi_variances == 0):
             bad_rois = np.where(roi_variances == 0)[0]
-            raise ValueError(f"ROI(s) {bad_rois} for {files[i_subj]} have variance of 0.")
+            LGR.warning(
+                f"ROI(s) {bad_rois} for {files[i_subj]} have variance of 0. "
+                "Dropping from analysis."
+            )
+            skip_subject = True
+
+        if skip_subject:
+            continue
 
         ts_all.append(raw_ts)
         raw_corrs = np.corrcoef(raw_ts)
         raw_corrs = raw_corrs[triu_idx]
         raw_corrs = raw_corrs[edge_sorting_idx]  # Sort from close to far ROI pairs
-        z_corr_mats[i_subj, :] = np.arctanh(raw_corrs)
+        z_corr_mats[subject_counter, :] = np.arctanh(raw_corrs)
+        subject_counter += 1
 
     del (raw_corrs, raw_ts, spheres_masker, atlas, coords)
+
+    z_corr_mats = z_corr_mats[:subject_counter, :]
+    LGR.info(f"Retaining {subject_counter - 1}/{n_subjects} for analysis.")
+    if subject_counter < 10:
+        raise ValueError("Too few subjects remaining for analysis.")
 
     analysis_values = pd.DataFrame(columns=["qcrsfc", "highlow", "scrubbing"], index=distances)
     analysis_values.index.name = "distance"
