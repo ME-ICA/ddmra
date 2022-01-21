@@ -111,7 +111,7 @@ def run_analyses(
     if confounds:
         LGR.info("Regressing confounds out of data.")
 
-    subject_counter = 0
+    good_subjects = []
     for i_subj in range(n_subjects):
         skip_subject = False
         if confounds:
@@ -141,14 +141,17 @@ def run_analyses(
         raw_corrs = np.corrcoef(raw_ts)
         raw_corrs = raw_corrs[triu_idx]
         raw_corrs = raw_corrs[edge_sorting_idx]  # Sort from close to far ROI pairs
-        z_corr_mats[subject_counter, :] = np.arctanh(raw_corrs)
-        subject_counter += 1
+        z_corr_mats[i_subj, :] = np.arctanh(raw_corrs)
+        good_subjects.append(i_subj)
 
     del (raw_corrs, raw_ts, spheres_masker, atlas, coords)
 
-    z_corr_mats = z_corr_mats[:subject_counter, :]
-    LGR.info(f"Retaining {subject_counter - 1}/{n_subjects} for analysis.")
-    if subject_counter < 10:
+    good_subjects = np.array(good_subjects)
+    z_corr_mats = z_corr_mats[good_subjects, :]
+    qc = [qc[i] for i in good_subjects]
+    mean_qc = mean_qc[good_subjects]
+    LGR.info(f"Retaining {len(good_subjects)}/{n_subjects} for analysis.")
+    if len(good_subjects) < 10:
         raise ValueError("Too few subjects remaining for analysis.")
 
     analysis_values = pd.DataFrame(columns=["qcrsfc", "highlow", "scrubbing"], index=distances)
