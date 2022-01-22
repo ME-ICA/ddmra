@@ -22,6 +22,7 @@ def run_analyses(
     n_jobs=1,
     qc_thresh=0.2,
     window=1000,
+    analyses=("qcrsfc", "highlow", "scrubbing"),
 ):
     """Run scrubbing, high-low motion, and QCRSFC analyses.
 
@@ -61,6 +62,13 @@ def run_analyses(
         The three arrays' keys are 'qcrsfc', 'highlow', and 'scrubbing'.
     - ``[analysis]_analysis.png``: Figure for each analysis.
     """
+    ALLOWED_ANALYSES = ("qcrsfc", "highlow", "scrubbing")
+    assert len(analyses) > 0, "At least one analysis must be selected."
+    assert all([a in ALLOWED_ANALYSES for a in analyses]), (
+        "Parameter 'analyses' must be a tuple of one or more of the following values: "
+        f"{', '.join(ALLOWED_ANALYSES)}"
+    )
+
     makedirs(out_dir, exist_ok=True)
 
     # create LGR with 'spam_application'
@@ -85,6 +93,9 @@ def run_analyses(
     distances = squareform(pdist(coords))
     distances = distances[triu_idx]
 
+    # Round distances to the nearest thousandth to prevent float comparison issues later
+    distances = np.round(distances, decimals=3)
+
     # Sorting index for distances
     edge_sorting_idx = distances.argsort()
     distances = distances[edge_sorting_idx]
@@ -101,9 +112,10 @@ def run_analyses(
         high_pass=None,
     )
 
-    # prep for qcrsfc and high-low motion analyses
-    mean_qc = np.array([np.mean(subj_qc) for subj_qc in qc])
-    z_corr_mats = np.zeros((n_subjects, distances.size))
+    if ("qcrsfc" in analyses) or ("highlow" in analyses):
+        # prep for qcrsfc and high-low motion analyses
+        mean_qc = np.array([np.mean(subj_qc) for subj_qc in qc])
+        z_corr_mats = np.zeros((n_subjects, distances.size))
 
     # Get correlation matrices
     ts_all = []
@@ -147,68 +159,77 @@ def run_analyses(
     del (raw_corrs, raw_ts, spheres_masker, atlas, coords)
 
     good_subjects = np.array(good_subjects)
-    z_corr_mats = z_corr_mats[good_subjects, :]
     qc = [qc[i] for i in good_subjects]
-    mean_qc = mean_qc[good_subjects]
-    LGR.info(f"Retaining {len(good_subjects)}/{n_subjects} for analysis.")
+
+    if ("qcrsfc" in analyses) or ("highlow" in analyses):
+        z_corr_mats = z_corr_mats[good_subjects, :]
+        mean_qc = mean_qc[good_subjects]
+
+    LGR.info(f"Retaining {len(good_subjects)}/{n_subjects} subjects for analysis.")
     if len(good_subjects) < 10:
         raise ValueError("Too few subjects remaining for analysis.")
 
-    analysis_values = pd.DataFrame(columns=["qcrsfc", "highlow", "scrubbing"], index=distances)
+    analysis_values = pd.DataFrame(columns=analyses, index=distances)
     analysis_values.index.name = "distance"
 
-    # QC:RSFC r analysis
-    LGR.info("Performing QC:RSFC analysis")
-    qcrsfc_values = analysis.qcrsfc_analysis(mean_qc, z_corr_mats)
-    analysis_values["qcrsfc"] = qcrsfc_values
-    qcrsfc_smoothing_curve = utils.moving_average(qcrsfc_values, window)
-    qcrsfc_smoothing_curve, smoothing_curve_distances = utils.average_across_distances(
-        qcrsfc_smoothing_curve,
-        distances,
-    )
-    print("qcrsfc", flush=True)
-    print(f"\tSmoothing curve: {qcrsfc_smoothing_curve.shape}")
-    print(f"\tDistances: {smoothing_curve_distances.shape}")
-
-    # Quick interlude to create the smoothing_curves DataFrame
-    smoothing_curves = pd.DataFrame(
-        columns=["qcrsfc", "highlow", "scrubbing"],
-        index=smoothing_curve_distances,
-    )
+    # Create the smoothing_curves DataFrame
+    ma_distances = utils.moving_average(distances, window)
+    _, smoothing_curve_distances = utils.average_across_distances(ma_distances, distances)
+    smoothing_curves = pd.DataFrame(columns=analyses, index=smoothing_curve_distances)
     smoothing_curves.index.name = "distance"
 
-    smoothing_curves.loc[smoothing_curve_distances, "qcrsfc"] = qcrsfc_smoothing_curve
-    del qcrsfc_values, qcrsfc_smoothing_curve
+    if "qcrsfc" in analyses:
+        # QC:RSFC r analysis
+        LGR.info("Performing QC:RSFC analysis")
+        qcrsfc_values = analysis.qcrsfc_analysis(mean_qc, z_corr_mats)
+        analysis_values["qcrsfc"] = qcrsfc_values
+        qcrsfc_smoothing_curve = utils.moving_average(qcrsfc_values, window)
+        qcrsfc_smoothing_curve, qcrsfc_smoothing_curve_distances = utils.average_across_distances(
+            qcrsfc_smoothing_curve,
+            distances,
+        )
+        print("qcrsfc", flush=True)
+        print(f"\tSmoothing curve: {qcrsfc_smoothing_curve.shape}")
+        print(f"\tDistances: {smoothing_curve_distances.shape}")
+        assert np.array_equal(smoothing_curve_distances, qcrsfc_smoothing_curve_distances)
+        smoothing_curves.loc[smoothing_curve_distances, "qcrsfc"] = qcrsfc_smoothing_curve
+        del qcrsfc_values, qcrsfc_smoothing_curve
 
-    # High-low motion analysis
-    LGR.info("Performing high-low motion analysis")
-    highlow_values = analysis.highlow_analysis(mean_qc, z_corr_mats)
-    analysis_values["highlow"] = highlow_values
-    hl_smoothing_curve = utils.moving_average(highlow_values, window)
-    hl_smoothing_curve, smoothing_curve_distances = utils.average_across_distances(
-        hl_smoothing_curve,
-        distances,
-    )
-    print("high-low", flush=True)
-    print(f"\tSmoothing curve: {hl_smoothing_curve.shape}")
-    print(f"\tDistances: {smoothing_curve_distances.shape}")
-    smoothing_curves.loc[smoothing_curve_distances, "highlow"] = hl_smoothing_curve
-    del highlow_values, hl_smoothing_curve
+    if "highlow" in analyses:
+        # High-low motion analysis
+        LGR.info("Performing high-low motion analysis")
+        highlow_values = analysis.highlow_analysis(mean_qc, z_corr_mats)
+        analysis_values["highlow"] = highlow_values
+        hl_smoothing_curve = utils.moving_average(highlow_values, window)
+        hl_smoothing_curve, hl_smoothing_curve_distances = utils.average_across_distances(
+            hl_smoothing_curve,
+            distances,
+        )
+        print("high-low", flush=True)
+        print(f"\tSmoothing curve: {hl_smoothing_curve.shape}")
+        print(f"\tDistances: {hl_smoothing_curve_distances.shape}")
+        assert np.array_equal(smoothing_curve_distances, hl_smoothing_curve_distances)
+        smoothing_curves.loc[smoothing_curve_distances, "highlow"] = hl_smoothing_curve
+        del highlow_values, hl_smoothing_curve
 
-    # Scrubbing analysis
-    LGR.info("Performing scrubbing analysis")
-    scrub_values = analysis.scrubbing_analysis(qc, ts_all, edge_sorting_idx, qc_thresh, perm=False)
-    analysis_values["scrubbing"] = scrub_values
-    scrub_smoothing_curve = utils.moving_average(scrub_values, window)
-    scrub_smoothing_curve, smoothing_curve_distances = utils.average_across_distances(
-        scrub_smoothing_curve,
-        distances,
-    )
-    print("scrubbing", flush=True)
-    print(f"\tSmoothing curve: {scrub_smoothing_curve.shape}")
-    print(f"\tDistances: {smoothing_curve_distances.shape}")
-    smoothing_curves.loc[smoothing_curve_distances, "scrubbing"] = scrub_smoothing_curve
-    del scrub_values, scrub_smoothing_curve
+    if "scrubbing" in analyses:
+        # Scrubbing analysis
+        LGR.info("Performing scrubbing analysis")
+        scrub_values = analysis.scrubbing_analysis(
+            qc, ts_all, edge_sorting_idx, qc_thresh, perm=False
+        )
+        analysis_values["scrubbing"] = scrub_values
+        scrub_smoothing_curve = utils.moving_average(scrub_values, window)
+        scrub_smoothing_curve, scrub_smoothing_curve_distances = utils.average_across_distances(
+            scrub_smoothing_curve,
+            distances,
+        )
+        print("scrubbing", flush=True)
+        print(f"\tSmoothing curve: {scrub_smoothing_curve.shape}")
+        print(f"\tDistances: {scrub_smoothing_curve_distances.shape}")
+        assert np.array_equal(smoothing_curve_distances, scrub_smoothing_curve_distances)
+        smoothing_curves.loc[smoothing_curve_distances, "scrubbing"] = scrub_smoothing_curve
+        del scrub_values, scrub_smoothing_curve
 
     analysis_values.reset_index(inplace=True)
     smoothing_curves.reset_index(inplace=True)
@@ -228,33 +249,39 @@ def run_analyses(
 
     # Null distributions
     LGR.info("Building null distributions with permutations")
-    qcrsfc_null_smoothing_curves, hl_null_smoothing_curves = analysis.other_null_distributions(
-        qc,
-        z_corr_mats,
-        distances,
-        window=window,
-        n_iters=n_iters,
-        n_jobs=n_jobs,
-    )
-    scrub_null_smoothing_curves = analysis.scrubbing_null_distribution(
-        qc,
-        ts_all,
-        distances,
-        qc_thresh,
-        edge_sorting_idx,
-        window=window,
-        n_iters=n_iters,
-        n_jobs=n_jobs,
-    )
+    null_curves_dict = {}
+    if ("qcrsfc" in analyses) or ("highlow" in analyses):
+        qcrsfc_null_smoothing_curves, hl_null_smoothing_curves = analysis.other_null_distributions(
+            qc,
+            z_corr_mats,
+            distances,
+            window=window,
+            n_iters=n_iters,
+            n_jobs=n_jobs,
+        )
+        if "qcrsfc" in analyses:
+            null_curves_dict["qcrsfc"] = qcrsfc_null_smoothing_curves.copy()
+            del qcrsfc_null_smoothing_curves
 
-    np.savez_compressed(
-        op.join(out_dir, "null_smoothing_curves.npz"),
-        qcrsfc=qcrsfc_null_smoothing_curves,
-        highlow=hl_null_smoothing_curves,
-        scrubbing=scrub_null_smoothing_curves,
-    )
+        if "highlow" in analyses:
+            null_curves_dict["highlow"] = hl_null_smoothing_curves.copy()
+            del hl_null_smoothing_curves
 
-    del qcrsfc_null_smoothing_curves, hl_null_smoothing_curves, scrub_null_smoothing_curves
+    if "scrubbing" in analyses:
+        null_curves_dict["scrubbing"] = analysis.scrubbing_null_distribution(
+            qc,
+            ts_all,
+            distances,
+            qc_thresh,
+            edge_sorting_idx,
+            window=window,
+            n_iters=n_iters,
+            n_jobs=n_jobs,
+        )
+
+    np.savez_compressed(op.join(out_dir, "null_smoothing_curves.npz"), **null_curves_dict)
+
+    del null_curves_dict
 
     plotting.plot_results(out_dir)
 

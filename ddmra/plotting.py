@@ -145,9 +145,14 @@ def plot_results(in_dir):
     smoothing_curves = pd.read_table(op.join(in_dir, "smoothing_curves.tsv.gz"))
     null_curves = np.load(op.join(in_dir, "null_smoothing_curves.npz"))
 
-    fig, axes = plt.subplots(figsize=(8, 24), nrows=len(METRIC_LABELS))
+    # Number of analyses is
+    found_analyses = [lab for lab in METRIC_LABELS.keys() if lab in analysis_values.columns]
+    n_analyses = len(found_analyses)
 
-    for i_analysis, (analysis_type, label) in enumerate(METRIC_LABELS.items()):
+    fig, axes = plt.subplots(figsize=(8, 8 * n_analyses), nrows=n_analyses)
+
+    for i_analysis, analysis_type in enumerate(found_analyses):
+        label = METRIC_LABELS[analysis_type]
         values = analysis_values[analysis_type].values
         smoothing_curve = smoothing_curves[analysis_type].values
 
