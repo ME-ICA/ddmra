@@ -84,6 +84,7 @@ def run_analyses(
 
     LGR.info("Preallocating matrices")
     n_subjects = len(files)
+    assert len(qc) == n_subjects, f"{len(qc)} != {n_subjects}"
 
     # Load atlas and associated masker
     atlas = datasets.fetch_coords_power_2011()
@@ -116,6 +117,7 @@ def run_analyses(
         # prep for qcrsfc and high-low motion analyses
         mean_qc = np.array([np.mean(subj_qc) for subj_qc in qc])
         z_corr_mats = np.zeros((n_subjects, distances.size))
+        assert mean_qc.size == n_subjects
 
     # Get correlation matrices
     ts_all = []
@@ -181,55 +183,55 @@ def run_analyses(
     if "qcrsfc" in analyses:
         # QC:RSFC r analysis
         LGR.info("Performing QC:RSFC analysis")
-        qcrsfc_values = analysis.qcrsfc_analysis(mean_qc, z_corr_mats)
-        analysis_values["qcrsfc"] = qcrsfc_values
-        qcrsfc_smoothing_curve = utils.moving_average(qcrsfc_values, window)
+        analysis_values["qcrsfc"] = analysis.qcrsfc_analysis(mean_qc, z_corr_mats)
+        qcrsfc_smoothing_curve = utils.moving_average(analysis_values["qcrsfc"], window)
         qcrsfc_smoothing_curve, qcrsfc_smoothing_curve_distances = utils.average_across_distances(
             qcrsfc_smoothing_curve,
             distances,
         )
         print("qcrsfc", flush=True)
+        print(f"\tQCRSFC values: {analysis_values['qcrsfc'].shape}")
         print(f"\tSmoothing curve: {qcrsfc_smoothing_curve.shape}")
         print(f"\tDistances: {smoothing_curve_distances.shape}")
         assert np.array_equal(smoothing_curve_distances, qcrsfc_smoothing_curve_distances)
         smoothing_curves.loc[smoothing_curve_distances, "qcrsfc"] = qcrsfc_smoothing_curve
-        del qcrsfc_values, qcrsfc_smoothing_curve
+        del qcrsfc_smoothing_curve
 
     if "highlow" in analyses:
         # High-low motion analysis
         LGR.info("Performing high-low motion analysis")
-        highlow_values = analysis.highlow_analysis(mean_qc, z_corr_mats)
-        analysis_values["highlow"] = highlow_values
-        hl_smoothing_curve = utils.moving_average(highlow_values, window)
+        analysis_values["highlow"] = analysis.highlow_analysis(mean_qc, z_corr_mats)
+        hl_smoothing_curve = utils.moving_average(analysis_values["highlow"], window)
         hl_smoothing_curve, hl_smoothing_curve_distances = utils.average_across_distances(
             hl_smoothing_curve,
             distances,
         )
         print("high-low", flush=True)
+        print(f"\tHigh-low values: {analysis_values['highlow'].shape}")
         print(f"\tSmoothing curve: {hl_smoothing_curve.shape}")
         print(f"\tDistances: {hl_smoothing_curve_distances.shape}")
         assert np.array_equal(smoothing_curve_distances, hl_smoothing_curve_distances)
         smoothing_curves.loc[smoothing_curve_distances, "highlow"] = hl_smoothing_curve
-        del highlow_values, hl_smoothing_curve
+        del hl_smoothing_curve
 
     if "scrubbing" in analyses:
         # Scrubbing analysis
         LGR.info("Performing scrubbing analysis")
-        scrub_values = analysis.scrubbing_analysis(
+        analysis_values["scrubbing"] = analysis.scrubbing_analysis(
             qc, ts_all, edge_sorting_idx, qc_thresh, perm=False
         )
-        analysis_values["scrubbing"] = scrub_values
-        scrub_smoothing_curve = utils.moving_average(scrub_values, window)
+        scrub_smoothing_curve = utils.moving_average(analysis_values["scrubbing"], window)
         scrub_smoothing_curve, scrub_smoothing_curve_distances = utils.average_across_distances(
             scrub_smoothing_curve,
             distances,
         )
         print("scrubbing", flush=True)
+        print(f"\tScrub values: {analysis_values['scrubbing'].shape}")
         print(f"\tSmoothing curve: {scrub_smoothing_curve.shape}")
         print(f"\tDistances: {scrub_smoothing_curve_distances.shape}")
         assert np.array_equal(smoothing_curve_distances, scrub_smoothing_curve_distances)
         smoothing_curves.loc[smoothing_curve_distances, "scrubbing"] = scrub_smoothing_curve
-        del scrub_values, scrub_smoothing_curve
+        del scrub_smoothing_curve
 
     analysis_values.reset_index(inplace=True)
     smoothing_curves.reset_index(inplace=True)

@@ -56,6 +56,8 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
        **WARNING** This is the opposite of how Power et al. did this!
     7. Average the difference values across participants.
     """
+    assert len(qc_values) == len(group_timeseries), f"{len(qc_values)} != {len(group_timeseries)}"
+
     n_rois = group_timeseries[0].shape[0]
     triu_idx = np.triu_indices(n_rois, k=1)
     n_pairs = len(triu_idx[0])
@@ -119,6 +121,10 @@ def highlow_analysis(mean_qcs, corr_mats):
     3. Calculate the average z-transformed correlation coefficient for each group.
     4. Subtract the low group's value from the high group's value, for each ROI-ROI pair.
     """
+    assert mean_qcs.ndim == 1, mean_qcs.ndim
+    assert corr_mats.ndim == 2, corr_mats.ndim
+    assert mean_qcs.shape[0] == corr_mats.shape[0], f"{mean_qcs.shape[0]} != {corr_mats.shape[0]}"
+
     highgroup_idx = mean_qcs >= np.median(mean_qcs)
     lowgroup_idx = mean_qcs < np.median(mean_qcs)
     highgroup_mean_z = np.mean(corr_mats[highgroup_idx, :], axis=0)
@@ -153,6 +159,10 @@ def qcrsfc_analysis(mean_qcs, corr_mats):
        across participants, for each ROI-ROI pair.
     3. Z-transform the edge-wise correlation coefficients.
     """
+    assert mean_qcs.ndim == 1, mean_qcs.ndim
+    assert corr_mats.ndim == 2, corr_mats.ndim
+    assert mean_qcs.shape[0] == corr_mats.shape[0], f"{mean_qcs.shape[0]} != {corr_mats.shape[0]}"
+
     # Correlate each ROI pair's z-value against QC measure (usually FD) across subjects.
     qcrsfc_rs = fast_pearson(corr_mats.T, mean_qcs)
     qcrsfc_zs = np.arctanh(qcrsfc_rs)
