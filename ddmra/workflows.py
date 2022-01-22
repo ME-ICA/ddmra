@@ -166,6 +166,9 @@ def run_analyses(
         qcrsfc_smoothing_curve,
         distances,
     )
+    print("qcrsfc", flush=True)
+    print(f"\tSmoothing curve: {qcrsfc_smoothing_curve.shape}")
+    print(f"\tDistances: {smoothing_curve_distances.shape}")
 
     # Quick interlude to create the smoothing_curves DataFrame
     smoothing_curves = pd.DataFrame(
@@ -186,6 +189,9 @@ def run_analyses(
         hl_smoothing_curve,
         distances,
     )
+    print("high-low", flush=True)
+    print(f"\tSmoothing curve: {hl_smoothing_curve.shape}")
+    print(f"\tDistances: {smoothing_curve_distances.shape}")
     smoothing_curves.loc[smoothing_curve_distances, "highlow"] = hl_smoothing_curve
     del highlow_values, hl_smoothing_curve
 
@@ -198,6 +204,9 @@ def run_analyses(
         scrub_smoothing_curve,
         distances,
     )
+    print("scrubbing", flush=True)
+    print(f"\tSmoothing curve: {scrub_smoothing_curve.shape}")
+    print(f"\tDistances: {smoothing_curve_distances.shape}")
     smoothing_curves.loc[smoothing_curve_distances, "scrubbing"] = scrub_smoothing_curve
     del scrub_values, scrub_smoothing_curve
 
