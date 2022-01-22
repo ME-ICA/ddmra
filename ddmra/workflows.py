@@ -164,8 +164,12 @@ def run_analyses(
     qc = [qc[i] for i in good_subjects]
 
     if ("qcrsfc" in analyses) or ("highlow" in analyses):
+        print(f"z_corr_mats: {z_corr_mats.shape}", flush=True)
+        print(f"mean_qc: {mean_qc.shape}", flush=True)
         z_corr_mats = z_corr_mats[good_subjects, :]
         mean_qc = mean_qc[good_subjects]
+        print(f"z_corr_mats: {z_corr_mats.shape}", flush=True)
+        print(f"mean_qc: {mean_qc.shape}", flush=True)
 
     LGR.info(f"Retaining {len(good_subjects)}/{n_subjects} subjects for analysis.")
     if len(good_subjects) < 10:
