@@ -5,7 +5,13 @@ import numpy as np
 from joblib import Parallel, delayed
 from tqdm import tqdm
 
-from .utils import average_across_distances, fast_pearson, moving_average, tqdm_joblib
+from .utils import (
+    average_across_distances,
+    fast_pearson,
+    moving_average,
+    r2z,
+    tqdm_joblib,
+)
 
 LGR = logging.getLogger("analysis")
 
@@ -77,10 +83,10 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
             scrubbed_ts = ts_arr[:, keep_idx]
             raw_corrs = np.corrcoef(ts_arr)
             raw_corrs = raw_corrs[triu_idx]
-            raw_zs = np.arctanh(raw_corrs)
+            raw_zs = r2z(raw_corrs)
             scrubbed_corrs = np.corrcoef(scrubbed_ts)
             scrubbed_corrs = scrubbed_corrs[triu_idx]
-            scrubbed_zs = np.arctanh(scrubbed_corrs)
+            scrubbed_zs = r2z(scrubbed_corrs)
             delta_zs[c, :] = raw_zs - scrubbed_zs  # opposite of Power
             c += 1
 
@@ -166,7 +172,7 @@ def qcrsfc_analysis(mean_qcs, corr_mats):
 
     # Correlate each ROI pair's z-value against QC measure (usually FD) across subjects.
     qcrsfc_rs = fast_pearson(corr_mats.T, mean_qcs)
-    qcrsfc_zs = np.arctanh(qcrsfc_rs)
+    qcrsfc_zs = r2z(qcrsfc_rs)
     return qcrsfc_zs
 
 

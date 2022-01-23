@@ -155,7 +155,7 @@ def run_analyses(
         raw_corrs = np.corrcoef(raw_ts)
         raw_corrs = raw_corrs[triu_idx]
         raw_corrs = raw_corrs[edge_sorting_idx]  # Sort from close to far ROI pairs
-        z_corr_mats[i_subj, :] = np.arctanh(raw_corrs)
+        z_corr_mats[i_subj, :] = utils.r2z(raw_corrs)
         good_subjects.append(i_subj)
 
     del (raw_corrs, raw_ts, spheres_masker, atlas, coords)
