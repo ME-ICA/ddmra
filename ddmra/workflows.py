@@ -164,12 +164,8 @@ def run_analyses(
     qc = [qc[i] for i in good_subjects]
 
     if ("qcrsfc" in analyses) or ("highlow" in analyses):
-        print(f"z_corr_mats: {z_corr_mats.shape}", flush=True)
-        print(f"mean_qc: {mean_qc.shape}", flush=True)
         z_corr_mats = z_corr_mats[good_subjects, :]
         mean_qc = mean_qc[good_subjects]
-        print(f"z_corr_mats: {z_corr_mats.shape}", flush=True)
-        print(f"mean_qc: {mean_qc.shape}", flush=True)
 
     LGR.info(f"Retaining {len(good_subjects)}/{n_subjects} subjects for analysis.")
     if len(good_subjects) < 10:
@@ -193,10 +189,6 @@ def run_analyses(
             qcrsfc_smoothing_curve,
             distances,
         )
-        print("qcrsfc", flush=True)
-        print(f"\tQCRSFC values: {analysis_values['qcrsfc'].shape}")
-        print(f"\tSmoothing curve: {qcrsfc_smoothing_curve.shape}")
-        print(f"\tDistances: {smoothing_curve_distances.shape}")
         assert np.array_equal(smoothing_curve_distances, qcrsfc_smoothing_curve_distances)
         smoothing_curves.loc[smoothing_curve_distances, "qcrsfc"] = qcrsfc_smoothing_curve
         del qcrsfc_smoothing_curve
@@ -210,10 +202,6 @@ def run_analyses(
             hl_smoothing_curve,
             distances,
         )
-        print("high-low", flush=True)
-        print(f"\tHigh-low values: {analysis_values['highlow'].shape}")
-        print(f"\tSmoothing curve: {hl_smoothing_curve.shape}")
-        print(f"\tDistances: {hl_smoothing_curve_distances.shape}")
         assert np.array_equal(smoothing_curve_distances, hl_smoothing_curve_distances)
         smoothing_curves.loc[smoothing_curve_distances, "highlow"] = hl_smoothing_curve
         del hl_smoothing_curve
@@ -229,10 +217,6 @@ def run_analyses(
             scrub_smoothing_curve,
             distances,
         )
-        print("scrubbing", flush=True)
-        print(f"\tScrub values: {analysis_values['scrubbing'].shape}")
-        print(f"\tSmoothing curve: {scrub_smoothing_curve.shape}")
-        print(f"\tDistances: {scrub_smoothing_curve_distances.shape}")
         assert np.array_equal(smoothing_curve_distances, scrub_smoothing_curve_distances)
         smoothing_curves.loc[smoothing_curve_distances, "scrubbing"] = scrub_smoothing_curve
         del scrub_smoothing_curve
