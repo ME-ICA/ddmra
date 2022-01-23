@@ -2,9 +2,10 @@
 import logging
 
 import numpy as np
+import tqdm
 from joblib import Parallel, delayed
 
-from .utils import average_across_distances, fast_pearson, moving_average
+from .utils import average_across_distances, fast_pearson, moving_average, tqdm_joblib
 
 LGR = logging.getLogger("analysis")
 
@@ -233,18 +234,19 @@ def scrubbing_null_distribution(
     """
     qc_values = [subj_qc_values.copy() for subj_qc_values in qc_values]
 
-    scrub_null_smoothing_curves = Parallel(n_jobs=n_jobs)(
-        delayed(_scrubbing_null_iter)(
-            qc_values,
-            ts_all,
-            distances,
-            qc_thresh,
-            edge_sorting_idx,
-            window,
-            seed=seed,
+    with tqdm_joblib(tqdm(desc="Scrubbing null distribution", total=n_iters)) as progress_bar:
+        scrub_null_smoothing_curves = Parallel(n_jobs=n_jobs)(
+            delayed(_scrubbing_null_iter)(
+                qc_values,
+                ts_all,
+                distances,
+                qc_thresh,
+                edge_sorting_idx,
+                window,
+                seed=seed,
+            )
+            for seed in range(n_iters)
         )
-        for seed in range(n_iters)
-    )
 
     scrub_null_smoothing_curves = np.vstack(scrub_null_smoothing_curves)
 
@@ -307,10 +309,12 @@ def other_null_distributions(
     qc_values = [subj_qc_values.copy() for subj_qc_values in qc_values]
     mean_qcs = np.array([np.mean(subj_qc_values) for subj_qc_values in qc_values])
 
-    results = Parallel(n_jobs=n_jobs)(
-        delayed(_other_null_iter)(mean_qcs, corr_mats, distances, window, seed=seed)
-        for seed in range(n_iters)
-    )
+    with tqdm_joblib(tqdm(desc="QCRSFC/HL null distributions", total=n_iters)) as progress_bar:
+        results = Parallel(n_jobs=n_jobs)(
+            delayed(_other_null_iter)(mean_qcs, corr_mats, distances, window, seed=seed)
+            for seed in range(n_iters)
+        )
+
     qcrsfc_null_smoothing_curves, hl_null_smoothing_curves = zip(*results)
 
     qcrsfc_null_smoothing_curves = np.vstack(qcrsfc_null_smoothing_curves)

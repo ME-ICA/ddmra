@@ -1,4 +1,7 @@
 """Miscellaneous utility functions for the DDMRA package."""
+import contextlib
+
+import joblib
 import numpy as np
 
 
@@ -280,3 +283,21 @@ def assess_significance(curve, null_curves, distances, intercept_distance, v2):
     p_inter = null_to_p(intercept, perm_intercepts, tail="upper")
     p_slope = null_to_p(slope, perm_slopes, tail="upper")
     return p_inter, p_slope
+
+
+@contextlib.contextmanager
+def tqdm_joblib(tqdm_object):
+    """Context manager to patch joblib to report into tqdm progress bar given as argument."""
+
+    class TqdmBatchCompletionCallback(joblib.parallel.BatchCompletionCallBack):
+        def __call__(self, *args, **kwargs):
+            tqdm_object.update(n=self.batch_size)
+            return super().__call__(*args, **kwargs)
+
+    old_batch_callback = joblib.parallel.BatchCompletionCallBack
+    joblib.parallel.BatchCompletionCallBack = TqdmBatchCompletionCallback
+    try:
+        yield tqdm_object
+    finally:
+        joblib.parallel.BatchCompletionCallBack = old_batch_callback
+        tqdm_object.close()
