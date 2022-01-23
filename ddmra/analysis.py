@@ -2,8 +2,8 @@
 import logging
 
 import numpy as np
-import tqdm
 from joblib import Parallel, delayed
+from tqdm import tqdm
 
 from .utils import average_across_distances, fast_pearson, moving_average, tqdm_joblib
 
