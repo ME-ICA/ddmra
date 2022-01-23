@@ -234,7 +234,7 @@ def scrubbing_null_distribution(
     """
     qc_values = [subj_qc_values.copy() for subj_qc_values in qc_values]
 
-    with tqdm_joblib(tqdm(desc="Scrubbing null distribution", total=n_iters)) as progress_bar:
+    with tqdm_joblib(tqdm(desc="Scrubbing null distribution", total=n_iters)):
         scrub_null_smoothing_curves = Parallel(n_jobs=n_jobs)(
             delayed(_scrubbing_null_iter)(
                 qc_values,
@@ -309,7 +309,7 @@ def other_null_distributions(
     qc_values = [subj_qc_values.copy() for subj_qc_values in qc_values]
     mean_qcs = np.array([np.mean(subj_qc_values) for subj_qc_values in qc_values])
 
-    with tqdm_joblib(tqdm(desc="QCRSFC/HL null distributions", total=n_iters)) as progress_bar:
+    with tqdm_joblib(tqdm(desc="QCRSFC/HL null distributions", total=n_iters)):
         results = Parallel(n_jobs=n_jobs)(
             delayed(_other_null_iter)(mean_qcs, corr_mats, distances, window, seed=seed)
             for seed in range(n_iters)
