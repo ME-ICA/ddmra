@@ -117,7 +117,7 @@ def run_analyses(
         # prep for qcrsfc and high-low motion analyses
         mean_qc = np.array([np.mean(subj_qc) for subj_qc in qc])
         z_corr_mats = np.zeros((n_subjects, distances.size))
-        assert mean_qc.size == n_subjects
+        assert mean_qc.size == n_subjects, f"{mean_qc.size} != {n_subjects}"
 
     # Get correlation matrices
     ts_all = []
@@ -133,7 +133,7 @@ def run_analyses(
         else:
             raw_ts = spheres_masker.fit_transform(files[i_subj]).T
 
-        assert raw_ts.shape[0] == n_rois
+        assert raw_ts.shape[0] == n_rois, f"{raw_ts.shape[0]} != {n_rois}"
 
         if np.any(np.isnan(raw_ts)):
             LGR.warning(f"Time series of {files[i_subj]} contains NaNs. Dropping from analysis.")
@@ -189,7 +189,9 @@ def run_analyses(
             qcrsfc_smoothing_curve,
             distances,
         )
-        assert np.array_equal(smoothing_curve_distances, qcrsfc_smoothing_curve_distances)
+        assert np.array_equal(smoothing_curve_distances, qcrsfc_smoothing_curve_distances), (
+            f"{smoothing_curve_distances} != {qcrsfc_smoothing_curve_distances}"
+        )
         smoothing_curves.loc[smoothing_curve_distances, "qcrsfc"] = qcrsfc_smoothing_curve
         del qcrsfc_smoothing_curve
 
@@ -202,7 +204,9 @@ def run_analyses(
             hl_smoothing_curve,
             distances,
         )
-        assert np.array_equal(smoothing_curve_distances, hl_smoothing_curve_distances)
+        assert np.array_equal(smoothing_curve_distances, hl_smoothing_curve_distances), (
+            f"{smoothing_curve_distances} != {hl_smoothing_curve_distances}"
+        )
         smoothing_curves.loc[smoothing_curve_distances, "highlow"] = hl_smoothing_curve
         del hl_smoothing_curve
 
@@ -217,7 +221,9 @@ def run_analyses(
             scrub_smoothing_curve,
             distances,
         )
-        assert np.array_equal(smoothing_curve_distances, scrub_smoothing_curve_distances)
+        assert np.array_equal(smoothing_curve_distances, scrub_smoothing_curve_distances), (
+            f"{smoothing_curve_distances} != {scrub_smoothing_curve_distances}"
+        )
         smoothing_curves.loc[smoothing_curve_distances, "scrubbing"] = scrub_smoothing_curve
         del scrub_smoothing_curve
 
