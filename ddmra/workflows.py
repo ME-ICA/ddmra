@@ -217,10 +217,14 @@ def run_analyses(
             qc, ts_all, edge_sorting_idx, qc_thresh, perm=False
         )
         scrub_smoothing_curve = utils.moving_average(analysis_values["scrubbing"], window)
+        print(f"scrub_smoothing_curve: {scrub_smoothing_curve.shape}", flush=True)
+        print(f"scrub_smoothing_curve: {scrub_smoothing_curve}", flush=True)
         scrub_smoothing_curve, scrub_smoothing_curve_distances = utils.average_across_distances(
             scrub_smoothing_curve,
             distances,
         )
+        print(f"scrub_smoothing_curve: {scrub_smoothing_curve.shape}", flush=True)
+        print(f"scrub_smoothing_curve: {scrub_smoothing_curve}", flush=True)
         assert np.array_equal(smoothing_curve_distances, scrub_smoothing_curve_distances), (
             f"{smoothing_curve_distances} != {scrub_smoothing_curve_distances}"
         )

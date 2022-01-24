@@ -104,7 +104,7 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
     print(f"mean_delta_z: {mean_delta_z.shape}", flush=True)
     print(f"mean_delta_z: {mean_delta_z}", flush=True)
     # Sort by ascending distance
-    mean_delta_z = mean_delta_z[:, edge_sorting_idx]
+    mean_delta_z = mean_delta_z[edge_sorting_idx]
     print(f"mean_delta_z after sorting: {mean_delta_z.shape}", flush=True)
     print(f"mean_delta_z after sorting: {mean_delta_z}", flush=True)
     return mean_delta_z
