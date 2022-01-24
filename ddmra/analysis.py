@@ -70,6 +70,7 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
     n_pairs = len(triu_idx[0])
     n_subjects = len(group_timeseries)
     delta_zs = np.zeros((n_subjects, n_pairs))
+    print(f"delta_zs: {delta_zs.shape}", flush=True)
     c = 0  # included subject counter
     for i_subj in range(n_subjects):
         ts_arr = group_timeseries[i_subj]
@@ -91,10 +92,12 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
             c += 1
 
     if not perm:
-        LGR.info(f"{c} of {n_subjects} subjects retained in scrubbing analysis")
+        print(f"{c} of {n_subjects} subjects retained in scrubbing analysis", flush=True)
 
     # Remove extra rows corresponding to bad subjects
     delta_zs = delta_zs[:c, :]
+    print(f"delta_zs: {delta_zs.shape}", flush=True)
+
     # Average over subjects
     mean_delta_z = np.mean(delta_zs, axis=0)
     # Sort by ascending distance
