@@ -216,15 +216,19 @@ def run_analyses(
         analysis_values["scrubbing"] = analysis.scrubbing_analysis(
             qc, ts_all, edge_sorting_idx, qc_thresh, perm=False
         )
+        print(f"analysis_values: {analysis_values['scrubbing']}", flush=True)
+        print(f"analysis_values: {analysis_values['scrubbing'].unique()}", flush=True)
         scrub_smoothing_curve = utils.moving_average(analysis_values["scrubbing"], window)
         print(f"scrub_smoothing_curve: {scrub_smoothing_curve.shape}", flush=True)
         print(f"scrub_smoothing_curve: {scrub_smoothing_curve}", flush=True)
+        print(f"scrub_smoothing_curve: {np.unique(scrub_smoothing_curve)}", flush=True)
         scrub_smoothing_curve, scrub_smoothing_curve_distances = utils.average_across_distances(
             scrub_smoothing_curve,
             distances,
         )
         print(f"scrub_smoothing_curve: {scrub_smoothing_curve.shape}", flush=True)
         print(f"scrub_smoothing_curve: {scrub_smoothing_curve}", flush=True)
+        print(f"scrub_smoothing_curve: {np.unique(scrub_smoothing_curve)}", flush=True)
         assert np.array_equal(smoothing_curve_distances, scrub_smoothing_curve_distances), (
             f"{smoothing_curve_distances} != {scrub_smoothing_curve_distances}"
         )
