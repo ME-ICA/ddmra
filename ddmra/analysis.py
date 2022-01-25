@@ -94,6 +94,9 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
                 print(f"scrubbed_ts: {scrubbed_ts}")
 
             raw_corrs = np.corrcoef(ts_arr)
+            if i_subj == 690:
+                raw_coords_sq = raw_corrs.copy()
+
             raw_corrs = raw_corrs[triu_idx]
             if np.any(np.isnan(raw_corrs)):
                 print(f"Subject {i_subj} has NaNs in raw_corrs.")
@@ -103,6 +106,19 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
                 print(f"Subject {i_subj} has NaNs in raw_zs.")
 
             scrubbed_corrs = np.corrcoef(scrubbed_ts)
+            if i_subj == 690:
+                nanidx = np.where(np.isnan(scrubbed_corrs))
+                print(f"Scrubbed corrs nans at {nanidx}")
+                for i_nan in range(len(nanidx[0])):
+                    idx1, idx2 = nanidx[0][i_nan], nanidx[1][i_nan]
+                    print(f"idx: ({idx1}, {idx2})")
+                    print(f"raw_corrs: {raw_coords_sq[idx1, idx2]}")
+                    print(f"ts_arr[idx1, :]: {ts_arr[idx1, :]}")
+                    print(f"ts_arr[idx2, :]: {ts_arr[idx2, :]}")
+                    print(f"scrubbed_ts[idx2, :]: {scrubbed_ts[idx2, :]}")
+                    print(f"scrubbed_ts[idx2, :]: {scrubbed_ts[idx2, :]}")
+                    print()
+
             scrubbed_corrs = scrubbed_corrs[triu_idx]
             if np.any(np.isnan(scrubbed_corrs)):
                 print(f"Subject {i_subj} has NaNs in scrubbed_corrs.")
