@@ -80,8 +80,19 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
         # Subjects with no timepoints excluded or with more than 50% excluded
         # will be excluded from analysis.
         prop_incl = np.sum(keep_idx) / qc_arr.shape[0]
+        if i_subj == 690:
+            print(f"Subject {i_subj} prop_incl: {prop_incl}")
+            print(f"qc_arr: {qc_arr.shape}")
+            print(f"qc_arr: {qc_arr}")
+            print(f"keep_idx: {keep_idx.shape}")
+            print(f"keep_idx: {keep_idx}")
+
         if (prop_incl >= 0.5) and (prop_incl != 1.0):
             scrubbed_ts = ts_arr[:, keep_idx]
+            if i_subj == 690:
+                print(f"scrubbed_ts: {scrubbed_ts.shape}")
+                print(f"scrubbed_ts: {scrubbed_ts}")
+
             raw_corrs = np.corrcoef(ts_arr)
             raw_corrs = raw_corrs[triu_idx]
             if np.any(np.isnan(raw_corrs)):
