@@ -216,9 +216,6 @@ def run_analyses(
         analysis_values["scrubbing"] = analysis.scrubbing_analysis(
             qc, ts_all, edge_sorting_idx, qc_thresh, perm=False
         )
-        analysis_values.to_csv("scrubbing_analysis.tsv", sep="\t", index_label="distance")
-        print(f"analysis_values: {analysis_values['scrubbing']}", flush=True)
-        print(f"analysis_values: {analysis_values['scrubbing'].unique()}", flush=True)
         scrub_smoothing_curve = utils.moving_average(analysis_values["scrubbing"], window)
         print(f"scrub_smoothing_curve: {scrub_smoothing_curve.shape}", flush=True)
         print(f"scrub_smoothing_curve: {scrub_smoothing_curve}", flush=True)

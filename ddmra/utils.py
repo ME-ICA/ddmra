@@ -305,8 +305,8 @@ def tqdm_joblib(tqdm_object):
 
 def r2z(r_arr):
     """Perform Fisher's r-to-z transform, cropping perfect correlations."""
-    z_arr = np.arctanh(r_arr)
     # In case of perfect correlations, which is possible when no components are rejected,
     # replace with high correlation.
-    z_arr[np.isinf(z_arr)] = np.arctanh(0.999) * np.sign(z_arr[np.isinf(z_arr)])
+    r_arr = np.clip(r_arr, a_min=-0.999, a_max=0.999)
+    z_arr = np.arctanh(r_arr)
     return z_arr

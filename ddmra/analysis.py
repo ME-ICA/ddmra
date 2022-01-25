@@ -84,11 +84,25 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
             scrubbed_ts = ts_arr[:, keep_idx]
             raw_corrs = np.corrcoef(ts_arr)
             raw_corrs = raw_corrs[triu_idx]
+            if np.any(np.isnan(raw_corrs)):
+                print(f"Subject {i_subj} has NaNs in raw_corrs.")
+
             raw_zs = r2z(raw_corrs)
+            if np.any(np.isnan(raw_zs)):
+                print(f"Subject {i_subj} has NaNs in raw_zs.")
+
             scrubbed_corrs = np.corrcoef(scrubbed_ts)
             scrubbed_corrs = scrubbed_corrs[triu_idx]
+            if np.any(np.isnan(scrubbed_corrs)):
+                print(f"Subject {i_subj} has NaNs in scrubbed_corrs.")
+
             scrubbed_zs = r2z(scrubbed_corrs)
+            if np.any(np.isnan(scrubbed_zs)):
+                print(f"Subject {i_subj} has NaNs in scrubbed_zs.")
+
             delta_zs[c, :] = raw_zs - scrubbed_zs  # opposite of Power
+            if np.any(np.isnan(delta_zs[c, :])):
+                print(f"Subject {i_subj} has NaNs in scrubbed_zs.")
             c += 1
 
     if not perm:
