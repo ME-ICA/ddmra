@@ -91,7 +91,7 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
             c += 1
 
     if not perm:
-        LGR.info(f"{c - 1} of {n_subjects} subjects retained in scrubbing analysis")
+        LGR.info(f"{c} of {n_subjects} subjects retained in scrubbing analysis")
 
     # Remove extra rows corresponding to bad subjects
     delta_zs = delta_zs[:c, :]
@@ -104,14 +104,14 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
     return mean_delta_z
 
 
-def highlow_analysis(mean_qcs, z_corr_mats):
+def highlow_analysis(mean_qcs, corr_mats):
     """Perform high-low QC analysis.
 
     Parameters
     ----------
     mean_qcs : numpy.ndarray of shape (n_subjects,)
         QC measure (typically mean framewise displacement) across participants.
-    z_corr_mats : numpy.ndarray of shape (n_subjects, n_edges)
+    corr_mats : numpy.ndarray of shape (n_subjects, n_edges)
         Z-transformed correlation coefficients for ROI-ROI pairs.
         n_edges is the *unique* ROI-to-ROI edges, not including self-self edges.
         These coefficients must be sorted according to ascending distance along the second axis.
@@ -131,27 +131,25 @@ def highlow_analysis(mean_qcs, z_corr_mats):
     4. Subtract the low group's value from the high group's value, for each ROI-ROI pair.
     """
     assert mean_qcs.ndim == 1, mean_qcs.ndim
-    assert z_corr_mats.ndim == 2, z_corr_mats.ndim
-    assert (
-        mean_qcs.shape[0] == z_corr_mats.shape[0]
-    ), f"{mean_qcs.shape[0]} != {z_corr_mats.shape[0]}"
+    assert corr_mats.ndim == 2, corr_mats.ndim
+    assert mean_qcs.shape[0] == corr_mats.shape[0], f"{mean_qcs.shape[0]} != {corr_mats.shape[0]}"
 
     highgroup_idx = mean_qcs >= np.median(mean_qcs)
     lowgroup_idx = mean_qcs < np.median(mean_qcs)
-    highgroup_mean_z = np.mean(z_corr_mats[highgroup_idx, :], axis=0)
-    lowgroup_mean_z = np.mean(z_corr_mats[lowgroup_idx, :], axis=0)
+    highgroup_mean_z = np.mean(corr_mats[highgroup_idx, :], axis=0)
+    lowgroup_mean_z = np.mean(corr_mats[lowgroup_idx, :], axis=0)
     hl_corr_diff = highgroup_mean_z - lowgroup_mean_z
     return hl_corr_diff
 
 
-def qcrsfc_analysis(mean_qcs, z_corr_mats):
+def qcrsfc_analysis(mean_qcs, corr_mats):
     """Perform quality-control resting-state functional connectivity analysis.
 
     Parameters
     ----------
     mean_qcs : numpy.ndarray of shape (n_subjects,)
         QC measure (typically mean framewise displacement) across participants.
-    z_corr_mats : numpy.ndarray of shape (n_subjects, n_edges)
+    corr_mats : numpy.ndarray of shape (n_subjects, n_edges)
         Z-transformed correlation coefficients for ROI-ROI pairs.
         n_edges is the *unique* ROI-to-ROI edges, not including self-self edges.
         These coefficients must be sorted according to ascending distance along the second axis.
@@ -171,13 +169,11 @@ def qcrsfc_analysis(mean_qcs, z_corr_mats):
     3. Z-transform the edge-wise correlation coefficients.
     """
     assert mean_qcs.ndim == 1, mean_qcs.ndim
-    assert z_corr_mats.ndim == 2, z_corr_mats.ndim
-    assert (
-        mean_qcs.shape[0] == z_corr_mats.shape[0]
-    ), f"{mean_qcs.shape[0]} != {z_corr_mats.shape[0]}"
+    assert corr_mats.ndim == 2, corr_mats.ndim
+    assert mean_qcs.shape[0] == corr_mats.shape[0], f"{mean_qcs.shape[0]} != {corr_mats.shape[0]}"
 
     # Correlate each ROI pair's z-value against QC measure (usually FD) across subjects.
-    qcrsfc_rs = fast_pearson(z_corr_mats.T, mean_qcs)
+    qcrsfc_rs = fast_pearson(corr_mats.T, mean_qcs)
     qcrsfc_zs = r2z(qcrsfc_rs)
     return qcrsfc_zs
 
@@ -274,13 +270,13 @@ def scrubbing_null_distribution(
     return scrub_null_smoothing_curves
 
 
-def _other_null_iter(mean_qc, z_corr_mats, distances, smoothing_curve_distances, window, seed=0):
+def _other_null_iter(mean_qc, corr_mats, distances, smoothing_curve_distances, window, seed=0):
     # Prep for QC:RSFC and high-low motion analyses
     perm_mean_qc = np.random.RandomState(seed=seed).permutation(mean_qc)
-    z_corr_mats = [corr_mat.copy() for corr_mat in z_corr_mats]
+    corr_mats = [corr_mat.copy() for corr_mat in corr_mats]
 
     # QC:RSFC analysis
-    perm_qcrsfc_zs = qcrsfc_analysis(perm_mean_qc, z_corr_mats)
+    perm_qcrsfc_zs = qcrsfc_analysis(perm_mean_qc, corr_mats)
     perm_qcrsfc_smoothing_curve = moving_average(perm_qcrsfc_zs, window)
     perm_qcrsfc_smoothing_curve, perm_smoothing_curve_distances = average_across_distances(
         perm_qcrsfc_smoothing_curve,
@@ -291,7 +287,7 @@ def _other_null_iter(mean_qc, z_corr_mats, distances, smoothing_curve_distances,
     ), f"{smoothing_curve_distances} != {perm_smoothing_curve_distances}"
 
     # High-low analysis
-    perm_hl_diff = highlow_analysis(perm_mean_qc, z_corr_mats)
+    perm_hl_diff = highlow_analysis(perm_mean_qc, corr_mats)
     perm_hl_smoothing_curve = moving_average(perm_hl_diff, window)
     perm_hl_smoothing_curve, perm_smoothing_curve_distances = average_across_distances(
         perm_hl_smoothing_curve,
@@ -306,7 +302,7 @@ def _other_null_iter(mean_qc, z_corr_mats, distances, smoothing_curve_distances,
 
 def other_null_distributions(
     mean_qc,
-    z_corr_mats,
+    corr_mats,
     distances,
     smoothing_curve_distances,
     window=1000,
@@ -319,7 +315,7 @@ def other_null_distributions(
     ----------
     mean_qc : numpy.ndarray of shape (n_subjects,)
         Mean QC value for each participant.
-    z_corr_mats : list of n_subjects length containing numpy.ndarray of shape (n_rois, n_rois)
+    corr_mats : list of n_subjects length containing numpy.ndarray of shape (n_rois, n_rois)
         Z-transformed ROI-ROI correlation matrix for each participant.
     distances : numpy.ndarray of shape (n_edges,)
         Distances for edges, already sorted in ascending order.
@@ -338,7 +334,7 @@ def other_null_distributions(
     with tqdm_joblib(tqdm(desc="QCRSFC/HL null distributions", total=n_iters)):
         results = Parallel(n_jobs=n_jobs)(
             delayed(_other_null_iter)(
-                mean_qc, z_corr_mats, distances, smoothing_curve_distances, window, seed=seed
+                mean_qc, corr_mats, distances, smoothing_curve_distances, window, seed=seed
             )
             for seed in range(n_iters)
         )
