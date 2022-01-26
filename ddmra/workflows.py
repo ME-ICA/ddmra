@@ -284,9 +284,9 @@ def run_analyses(
 
     for ana, null_curve in null_curves_dict.items():
         assert null_curve.shape == (
-            smoothing_curve_distances.size,
             n_iters,
-        ), f"{ana}: {null_curve.shape} != ({smoothing_curve_distances.size}, {n_iters})"
+            smoothing_curve_distances.size,
+        ), f"{ana}: {null_curve.shape} != ({n_iters}, {smoothing_curve_distances.size})"
 
     np.savez_compressed(op.join(out_dir, "null_smoothing_curves.npz"), **null_curves_dict)
 
