@@ -132,7 +132,9 @@ def highlow_analysis(mean_qcs, z_corr_mats):
     """
     assert mean_qcs.ndim == 1, mean_qcs.ndim
     assert z_corr_mats.ndim == 2, z_corr_mats.ndim
-    assert mean_qcs.shape[0] == z_corr_mats.shape[0], f"{mean_qcs.shape[0]} != {z_corr_mats.shape[0]}"
+    assert (
+        mean_qcs.shape[0] == z_corr_mats.shape[0]
+    ), f"{mean_qcs.shape[0]} != {z_corr_mats.shape[0]}"
 
     highgroup_idx = mean_qcs >= np.median(mean_qcs)
     lowgroup_idx = mean_qcs < np.median(mean_qcs)
@@ -170,7 +172,9 @@ def qcrsfc_analysis(mean_qcs, z_corr_mats):
     """
     assert mean_qcs.ndim == 1, mean_qcs.ndim
     assert z_corr_mats.ndim == 2, z_corr_mats.ndim
-    assert mean_qcs.shape[0] == z_corr_mats.shape[0], f"{mean_qcs.shape[0]} != {z_corr_mats.shape[0]}"
+    assert (
+        mean_qcs.shape[0] == z_corr_mats.shape[0]
+    ), f"{mean_qcs.shape[0]} != {z_corr_mats.shape[0]}"
 
     # Correlate each ROI pair's z-value against QC measure (usually FD) across subjects.
     qcrsfc_rs = fast_pearson(z_corr_mats.T, mean_qcs)
