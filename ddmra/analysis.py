@@ -182,12 +182,15 @@ def _scrubbing_null_iter(
     qc_values,
     ts_all,
     distances,
+    smoothing_curve_distances,
     qc_thresh,
     edge_sorting_idx,
     window,
     seed=0,
 ):
     perm_qcs = [np.random.RandomState(seed=seed).permutation(perm_qc) for perm_qc in qc_values]
+    ts_all = [ts.copy() for ts in ts_all]
+
     perm_mean_delta_zs = scrubbing_analysis(
         perm_qcs,
         ts_all,
@@ -196,10 +199,13 @@ def _scrubbing_null_iter(
         perm=True,
     )
     perm_scrub_smoothing_curve = moving_average(perm_mean_delta_zs, window)
-    perm_scrub_smoothing_curve, _ = average_across_distances(
+    perm_scrub_smoothing_curve, perm_smoothing_curve_distances = average_across_distances(
         perm_scrub_smoothing_curve,
         distances,
     )
+    assert np.array_equal(
+        smoothing_curve_distances, perm_smoothing_curve_distances
+    ), f"{smoothing_curve_distances} != {perm_smoothing_curve_distances}"
     return perm_scrub_smoothing_curve
 
 
@@ -207,6 +213,7 @@ def scrubbing_null_distribution(
     qc_values,
     ts_all,
     distances,
+    smoothing_curve_distances,
     qc_thresh,
     edge_sorting_idx,
     window=1000,
@@ -241,6 +248,7 @@ def scrubbing_null_distribution(
         Smoothing curves for all permutations, to be used as a null distribution.
     """
     qc_values = [subj_qc_values.copy() for subj_qc_values in qc_values]
+    ts_all = [subj_ts_values.copy() for subj_ts_values in ts_all]
 
     with tqdm_joblib(tqdm(desc="Scrubbing null distribution", total=n_iters)):
         scrub_null_smoothing_curves = Parallel(n_jobs=n_jobs)(
@@ -248,6 +256,7 @@ def scrubbing_null_distribution(
                 qc_values,
                 ts_all,
                 distances,
+                smoothing_curve_distances,
                 qc_thresh,
                 edge_sorting_idx,
                 window,
@@ -261,33 +270,41 @@ def scrubbing_null_distribution(
     return scrub_null_smoothing_curves
 
 
-def _other_null_iter(mean_qcs, corr_mats, distances, window, seed=0):
+def _other_null_iter(mean_qc, corr_mats, distances, smoothing_curve_distances, window, seed=0):
     # Prep for QC:RSFC and high-low motion analyses
-    perm_mean_qcs = np.random.RandomState(seed=seed).permutation(mean_qcs)
+    perm_mean_qc = np.random.RandomState(seed=seed).permutation(mean_qc)
+    corr_mats = [corr_mat.copy() for corr_mat in corr_mats]
 
     # QC:RSFC analysis
-    perm_qcrsfc_zs = qcrsfc_analysis(perm_mean_qcs, corr_mats)
+    perm_qcrsfc_zs = qcrsfc_analysis(perm_mean_qc, corr_mats)
     perm_qcrsfc_smoothing_curve = moving_average(perm_qcrsfc_zs, window)
-    perm_qcrsfc_smoothing_curve, _ = average_across_distances(
+    perm_qcrsfc_smoothing_curve, perm_smoothing_curve_distances = average_across_distances(
         perm_qcrsfc_smoothing_curve,
         distances,
     )
+    assert np.array_equal(
+        smoothing_curve_distances, perm_smoothing_curve_distances
+    ), f"{smoothing_curve_distances} != {perm_smoothing_curve_distances}"
 
     # High-low analysis
-    perm_hl_diff = highlow_analysis(perm_mean_qcs, corr_mats)
+    perm_hl_diff = highlow_analysis(perm_mean_qc, corr_mats)
     perm_hl_smoothing_curve = moving_average(perm_hl_diff, window)
-    perm_hl_smoothing_curve, _ = average_across_distances(
+    perm_hl_smoothing_curve, perm_smoothing_curve_distances = average_across_distances(
         perm_hl_smoothing_curve,
         distances,
     )
+    assert np.array_equal(
+        smoothing_curve_distances, perm_smoothing_curve_distances
+    ), f"{smoothing_curve_distances} != {perm_smoothing_curve_distances}"
 
     return perm_qcrsfc_smoothing_curve, perm_hl_smoothing_curve
 
 
 def other_null_distributions(
-    qc_values,
+    mean_qc,
     corr_mats,
     distances,
+    smoothing_curve_distances,
     window=1000,
     n_iters=10000,
     n_jobs=1,
@@ -296,8 +313,8 @@ def other_null_distributions(
 
     Parameters
     ----------
-    qc_values : list of n_subjects length containing numpy.ndarray of shape (n_timepoints,)
-        QC time series for each participant.
+    mean_qc : numpy.ndarray of shape (n_subjects,)
+        Mean QC value for each participant.
     corr_mats : list of n_subjects length containing numpy.ndarray of shape (n_rois, n_rois)
         Z-transformed ROI-ROI correlation matrix for each participant.
     distances : numpy.ndarray of shape (n_edges,)
@@ -314,12 +331,11 @@ def other_null_distributions(
     perm_hl_smoothing_curve : numpy.ndarray of shape (n_iters, n_unique_edge_distances)
         Smoothing curves for all permutations, to be used as a null distribution.
     """
-    qc_values = [subj_qc_values.copy() for subj_qc_values in qc_values]
-    mean_qcs = np.array([np.mean(subj_qc_values) for subj_qc_values in qc_values])
-
     with tqdm_joblib(tqdm(desc="QCRSFC/HL null distributions", total=n_iters)):
         results = Parallel(n_jobs=n_jobs)(
-            delayed(_other_null_iter)(mean_qcs, corr_mats, distances, window, seed=seed)
+            delayed(_other_null_iter)(
+                mean_qc, corr_mats, distances, smoothing_curve_distances, window, seed=seed
+            )
             for seed in range(n_iters)
         )
 

@@ -163,7 +163,7 @@ def run_analyses(
 
         good_subjects.append(i_subj)
 
-    del (raw_ts, spheres_masker, atlas, coords)
+    del (spheres_masker, atlas, coords)
 
     good_subjects = np.array(good_subjects)
     qc = [qc[i] for i in good_subjects]
@@ -194,9 +194,9 @@ def run_analyses(
             qcrsfc_smoothing_curve,
             distances,
         )
-        assert np.array_equal(smoothing_curve_distances, qcrsfc_smoothing_curve_distances), (
-            f"{smoothing_curve_distances} != {qcrsfc_smoothing_curve_distances}"
-        )
+        assert np.array_equal(
+            smoothing_curve_distances, qcrsfc_smoothing_curve_distances
+        ), f"{smoothing_curve_distances} != {qcrsfc_smoothing_curve_distances}"
         smoothing_curves.loc[smoothing_curve_distances, "qcrsfc"] = qcrsfc_smoothing_curve
         del qcrsfc_smoothing_curve
 
@@ -209,9 +209,9 @@ def run_analyses(
             hl_smoothing_curve,
             distances,
         )
-        assert np.array_equal(smoothing_curve_distances, hl_smoothing_curve_distances), (
-            f"{smoothing_curve_distances} != {hl_smoothing_curve_distances}"
-        )
+        assert np.array_equal(
+            smoothing_curve_distances, hl_smoothing_curve_distances
+        ), f"{smoothing_curve_distances} != {hl_smoothing_curve_distances}"
         smoothing_curves.loc[smoothing_curve_distances, "highlow"] = hl_smoothing_curve
         del hl_smoothing_curve
 
@@ -226,9 +226,9 @@ def run_analyses(
             scrub_smoothing_curve,
             distances,
         )
-        assert np.array_equal(smoothing_curve_distances, scrub_smoothing_curve_distances), (
-            f"{smoothing_curve_distances} != {scrub_smoothing_curve_distances}"
-        )
+        assert np.array_equal(
+            smoothing_curve_distances, scrub_smoothing_curve_distances
+        ), f"{smoothing_curve_distances} != {scrub_smoothing_curve_distances}"
         smoothing_curves.loc[smoothing_curve_distances, "scrubbing"] = scrub_smoothing_curve
         del scrub_smoothing_curve
 
@@ -253,9 +253,10 @@ def run_analyses(
     null_curves_dict = {}
     if ("qcrsfc" in analyses) or ("highlow" in analyses):
         qcrsfc_null_smoothing_curves, hl_null_smoothing_curves = analysis.other_null_distributions(
-            qc,
+            mean_qc,
             z_corr_mats,
             distances,
+            smoothing_curve_distances,
             window=window,
             n_iters=n_iters,
             n_jobs=n_jobs,
@@ -273,12 +274,19 @@ def run_analyses(
             qc,
             ts_all,
             distances,
+            smoothing_curve_distances,
             qc_thresh,
             edge_sorting_idx,
             window=window,
             n_iters=n_iters,
             n_jobs=n_jobs,
         )
+
+    for ana, null_curve in null_curves_dict.items():
+        assert null_curve.shape == (
+            smoothing_curve_distances.size,
+            n_iters,
+        ), f"{ana}: {null_curve.shape} != ({smoothing_curve_distances.size}, {n_iters})"
 
     np.savez_compressed(op.join(out_dir, "null_smoothing_curves.npz"), **null_curves_dict)
 
