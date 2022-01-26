@@ -25,7 +25,7 @@ def plot_analysis(
     null_smoothing_curves,
     n_lines=50,
     metric_name=None,
-    ylim=(-0.5, 0.5),
+    ylim=1,
     fig=None,
     ax=None,
 ):
@@ -101,7 +101,7 @@ def plot_analysis(
         np.ceil(np.max(data_points) / (10 ** ylim)) * (10 ** ylim),
     )
     ax.set_yticks(ylims)
-    ax.set_yticklabels(ylim, fontsize=32)
+    ax.set_yticklabels(ylims, fontsize=32)
     ax.set_ylim(ylims)
 
     ax.set_xlabel("Distance (mm)", fontsize=32)
