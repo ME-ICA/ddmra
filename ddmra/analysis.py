@@ -70,7 +70,6 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
     n_pairs = len(triu_idx[0])
     n_subjects = len(group_timeseries)
     delta_zs = np.zeros((n_subjects, n_pairs))
-    print(f"delta_zs: {delta_zs.shape}", flush=True)
     c = 0  # included subject counter
     for i_subj in range(n_subjects):
         ts_arr = group_timeseries[i_subj]
@@ -80,75 +79,28 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
         # Subjects with no timepoints excluded or with more than 50% excluded
         # will be excluded from analysis.
         prop_incl = np.sum(keep_idx) / qc_arr.shape[0]
-        if i_subj == 690:
-            print(f"Subject {i_subj} prop_incl: {prop_incl}")
-            print(f"qc_arr: {qc_arr.shape}")
-            print(f"qc_arr: {qc_arr}")
-            print(f"keep_idx: {keep_idx.shape}")
-            print(f"keep_idx: {keep_idx}")
-
         if (prop_incl >= 0.5) and (prop_incl != 1.0):
             scrubbed_ts = ts_arr[:, keep_idx]
-            if i_subj == 690:
-                print(f"scrubbed_ts: {scrubbed_ts.shape}")
-                print(f"scrubbed_ts: {scrubbed_ts}")
-
             raw_corrs = np.corrcoef(ts_arr)
-            if i_subj == 690:
-                raw_coords_sq = raw_corrs.copy()
-
             raw_corrs = raw_corrs[triu_idx]
-            if np.any(np.isnan(raw_corrs)):
-                print(f"Subject {i_subj} has NaNs in raw_corrs.")
-                raise Exception()
-
             raw_zs = r2z(raw_corrs)
-            if np.any(np.isnan(raw_zs)):
-                print(f"Subject {i_subj} has NaNs in raw_zs.")
-
             scrubbed_corrs = np.corrcoef(scrubbed_ts)
-            if i_subj == 690:
-                nanidx = np.where(np.isnan(scrubbed_corrs))
-                print(f"Scrubbed corrs nans at {nanidx}")
-                for i_nan in range(len(nanidx[0])):
-                    idx1, idx2 = nanidx[0][i_nan], nanidx[1][i_nan]
-                    print(f"idx: ({idx1}, {idx2})")
-                    print(f"raw_corrs: {raw_coords_sq[idx1, idx2]}")
-                    print(f"ts_arr[idx1, :]: {ts_arr[idx1, :]}")
-                    print(f"ts_arr[idx2, :]: {ts_arr[idx2, :]}")
-                    print(f"scrubbed_ts[idx2, :]: {scrubbed_ts[idx2, :]}")
-                    print(f"scrubbed_ts[idx2, :]: {scrubbed_ts[idx2, :]}")
-                    print()
-
             scrubbed_corrs = scrubbed_corrs[triu_idx]
-            if np.any(np.isnan(scrubbed_corrs)):
-                print(f"Subject {i_subj} has NaNs in scrubbed_corrs.")
-
             scrubbed_zs = r2z(scrubbed_corrs)
-            if np.any(np.isnan(scrubbed_zs)):
-                print(f"Subject {i_subj} has NaNs in scrubbed_zs.")
-
             delta_zs[c, :] = raw_zs - scrubbed_zs  # opposite of Power
-            if np.any(np.isnan(delta_zs[c, :])):
-                print(f"Subject {i_subj} has NaNs in scrubbed_zs.")
             c += 1
 
     if not perm:
-        print(f"{c} of {n_subjects} subjects retained in scrubbing analysis", flush=True)
+        LGR.info(f"{c} of {n_subjects} subjects retained in scrubbing analysis")
 
     # Remove extra rows corresponding to bad subjects
     delta_zs = delta_zs[:c, :]
-    print(f"delta_zs: {delta_zs.shape}", flush=True)
-    print(f"delta_zs: {delta_zs}", flush=True)
 
     # Average over subjects
     mean_delta_z = np.mean(delta_zs, axis=0)
-    print(f"mean_delta_z: {mean_delta_z.shape}", flush=True)
-    print(f"mean_delta_z: {mean_delta_z}", flush=True)
+
     # Sort by ascending distance
     mean_delta_z = mean_delta_z[edge_sorting_idx]
-    print(f"mean_delta_z after sorting: {mean_delta_z.shape}", flush=True)
-    print(f"mean_delta_z after sorting: {mean_delta_z}", flush=True)
     return mean_delta_z
 
 

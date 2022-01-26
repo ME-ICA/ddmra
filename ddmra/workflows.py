@@ -140,8 +140,8 @@ def run_analyses(
             skip_subject = True
 
         roi_variances = np.var(raw_ts, axis=1)
-        if any(roi_variances == 0):
-            bad_rois = np.where(roi_variances == 0)[0]
+        if any(np.isclose(roi_variances, 0)):
+            bad_rois = np.where(np.isclose(roi_variances, 0))[0]
             LGR.warning(
                 f"ROI(s) {bad_rois} for {files[i_subj]} have variance of 0. "
                 "Dropping from analysis."
@@ -175,8 +175,6 @@ def run_analyses(
     LGR.info(f"Retaining {len(good_subjects)}/{n_subjects} subjects for analysis.")
     if len(good_subjects) < 10:
         raise ValueError("Too few subjects remaining for analysis.")
-
-    print([files[i] for i in good_subjects])
 
     analysis_values = pd.DataFrame(columns=analyses, index=distances)
     analysis_values.index.name = "distance"
@@ -224,16 +222,10 @@ def run_analyses(
             qc, ts_all, edge_sorting_idx, qc_thresh, perm=False
         )
         scrub_smoothing_curve = utils.moving_average(analysis_values["scrubbing"], window)
-        print(f"scrub_smoothing_curve: {scrub_smoothing_curve.shape}", flush=True)
-        print(f"scrub_smoothing_curve: {scrub_smoothing_curve}", flush=True)
-        print(f"scrub_smoothing_curve: {np.unique(scrub_smoothing_curve)}", flush=True)
         scrub_smoothing_curve, scrub_smoothing_curve_distances = utils.average_across_distances(
             scrub_smoothing_curve,
             distances,
         )
-        print(f"scrub_smoothing_curve: {scrub_smoothing_curve.shape}", flush=True)
-        print(f"scrub_smoothing_curve: {scrub_smoothing_curve}", flush=True)
-        print(f"scrub_smoothing_curve: {np.unique(scrub_smoothing_curve)}", flush=True)
         assert np.array_equal(smoothing_curve_distances, scrub_smoothing_curve_distances), (
             f"{smoothing_curve_distances} != {scrub_smoothing_curve_distances}"
         )
