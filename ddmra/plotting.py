@@ -96,9 +96,10 @@ def plot_analysis(
     ax.plot(curve_distances, smoothing_curve, color="white")
 
     ax.set_ylabel(metric_name, fontsize=32, labelpad=-30)
+    # Round to nearest decimal point at level you want.
     ylims = (
-        np.floor(np.min(data_points) / (10 ** ylim)) * (10 ** ylim),
-        np.ceil(np.max(data_points) / (10 ** ylim)) * (10 ** ylim),
+        np.floor(np.min(data_points) * (10 ** ylim)) / (10 ** ylim),
+        np.ceil(np.max(data_points) * (10 ** ylim)) / (10 ** ylim),
     )
     ax.set_yticks(ylims)
     ax.set_yticklabels(ylims, fontsize=32)
@@ -107,6 +108,7 @@ def plot_analysis(
     ax.set_xlabel("Distance (mm)", fontsize=32)
     ax.set_xticks([0, 50, 100, 150])
     ax.set_xticklabels([])
+    # Round to nearest 10.
     ax.set_xlim(0, np.ceil(np.max(distances) / 10) * 10)
 
     ax.annotate(
