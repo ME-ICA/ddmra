@@ -171,6 +171,9 @@ def run_analyses(
     if len(good_subjects) < 10:
         raise ValueError("Too few subjects remaining for analysis.")
 
+    print(good_subjects[690])
+    print(f"ts_all[609][120, :]: {ts_all[690][120, :]}")
+
     analysis_values = pd.DataFrame(columns=analyses, index=distances)
     analysis_values.index.name = "distance"
 
@@ -211,6 +214,7 @@ def run_analyses(
         del hl_smoothing_curve
 
     if "scrubbing" in analyses:
+        print(f"ts_all[609][120, :]: {ts_all[690][120, :]}")
         # Scrubbing analysis
         LGR.info("Performing scrubbing analysis")
         analysis_values["scrubbing"] = analysis.scrubbing_analysis(
