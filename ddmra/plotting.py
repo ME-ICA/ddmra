@@ -96,9 +96,13 @@ def plot_analysis(
     ax.plot(curve_distances, smoothing_curve, color="white")
 
     ax.set_ylabel(metric_name, fontsize=32, labelpad=-30)
-    ax.set_yticks(ylim)
+    ylims = (
+        np.floor(np.min(data_points) / (10 ** ylim)) * (10 ** ylim),
+        np.ceil(np.max(data_points) / (10 ** ylim)) * (10 ** ylim),
+    )
+    ax.set_yticks(ylims)
     ax.set_yticklabels(ylim, fontsize=32)
-    ax.set_ylim(ylim)
+    ax.set_ylim(ylims)
 
     ax.set_xlabel("Distance (mm)", fontsize=32)
     ax.set_xticks([0, 50, 100, 150])
@@ -137,9 +141,9 @@ def plot_results(in_dir):
         "scrubbing": "Scrubbing\n" + r"${\Delta}z_{r}$",
     }
     YLIMS = {
-        "qcrsfc": (-1.0, 1.0),
-        "highlow": (-1.0, 1.0),
-        "scrubbing": (-0.05, 0.05),
+        "qcrsfc": 1,
+        "highlow": 1,
+        "scrubbing": 2,
     }
     analysis_values = pd.read_table(op.join(in_dir, "analysis_values.tsv.gz"))
     smoothing_curves = pd.read_table(op.join(in_dir, "smoothing_curves.tsv.gz"))
