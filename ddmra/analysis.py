@@ -100,6 +100,7 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
             raw_corrs = raw_corrs[triu_idx]
             if np.any(np.isnan(raw_corrs)):
                 print(f"Subject {i_subj} has NaNs in raw_corrs.")
+                raise Exception()
 
             raw_zs = r2z(raw_corrs)
             if np.any(np.isnan(raw_zs)):
