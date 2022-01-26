@@ -152,13 +152,18 @@ def run_analyses(
             continue
 
         ts_all.append(raw_ts)
-        raw_corrs = np.corrcoef(raw_ts)
-        raw_corrs = raw_corrs[triu_idx]
-        raw_corrs = raw_corrs[edge_sorting_idx]  # Sort from close to far ROI pairs
-        z_corr_mats[i_subj, :] = utils.r2z(raw_corrs)
+
+        if ("qcrsfc" in analyses) or ("highlow" in analyses):
+            raw_corrs = np.corrcoef(raw_ts)
+            raw_corrs = raw_corrs[triu_idx]
+            raw_corrs = raw_corrs[edge_sorting_idx]  # Sort from close to far ROI pairs
+            z_corr_mats[i_subj, :] = utils.r2z(raw_corrs)
+
+            del raw_corrs
+
         good_subjects.append(i_subj)
 
-    del (raw_corrs, raw_ts, spheres_masker, atlas, coords)
+    del (raw_ts, spheres_masker, atlas, coords)
 
     good_subjects = np.array(good_subjects)
     qc = [qc[i] for i in good_subjects]
