@@ -176,7 +176,7 @@ def run_analyses(
     if len(good_subjects) < 10:
         raise ValueError("Too few subjects remaining for analysis.")
 
-    print(good_subjects)
+    print([files[i] for i in good_subjects])
 
     analysis_values = pd.DataFrame(columns=analyses, index=distances)
     analysis_values.index.name = "distance"
