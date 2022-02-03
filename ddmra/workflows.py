@@ -183,6 +183,7 @@ def run_analyses(
         mean_qc = mean_qc[good_subjects]
 
         if verbose:
+            LGR.info("Saving z-transformed file-wise correlation coefficients")
             # Assumes no periods in the filename except for the extension
             file_names = [op.basename(files[i]).split(".")[0] for i in good_subjects]
             corrs_df = pd.DataFrame(index=distances, columns=file_names, data=z_corr_mats.T)
