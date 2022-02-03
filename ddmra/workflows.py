@@ -23,6 +23,7 @@ def run_analyses(
     qc_thresh=0.2,
     window=1000,
     analyses=("qcrsfc", "highlow", "scrubbing"),
+    verbose=False,
 ):
     """Run scrubbing, high-low motion, and QCRSFC analyses.
 
@@ -46,6 +47,11 @@ def run_analyses(
     window : int, optional
         Number of units (pairs of ROIs) to include when averaging to generate smoothing curve.
         Default is 1000.
+    analyses : tuple, optional
+        The analyses to run. Must be one or more of "qcrsfc", "highlow", "scrubbing".
+    verbose : bool, optional
+        If verbose, write out the correlation coefficients used by the QC:RSFC and high-how
+        analyses. Default is False.
 
     Notes
     -----
@@ -61,6 +67,10 @@ def run_analyses(
         and number of rows is number of iterations for permutation analysis.
         The three arrays' keys are 'qcrsfc', 'highlow', and 'scrubbing'.
     - ``[analysis]_analysis.png``: Figure for each analysis.
+
+    If ``verbose`` is ``True``:
+    - ``z_corrs.tsv.gz``: Z-transformed correlation coefficients used by QC:RSFC and high-low
+        analyses.
     """
     ALLOWED_ANALYSES = ("qcrsfc", "highlow", "scrubbing")
     assert len(analyses) > 0, "At least one analysis must be selected."
@@ -171,6 +181,18 @@ def run_analyses(
     if ("qcrsfc" in analyses) or ("highlow" in analyses):
         z_corr_mats = z_corr_mats[good_subjects, :]
         mean_qc = mean_qc[good_subjects]
+
+        if verbose:
+            # Assumes no periods in the filename except for the extension
+            file_names = [op.basename(files[i]).split(".")[0] for i in good_subjects]
+            corrs_df = pd.DataFrame(index=distances, columns=file_names, data=z_corr_mats.T)
+            corrs_df.to_csv(
+                op.join(out_dir, "z_corrs.tsv.gz"),
+                sep="\t",
+                line_terminator="\n",
+                index=False,
+            )
+            del corrs_df, file_names
 
     LGR.info(f"Retaining {len(good_subjects)}/{n_subjects} subjects for analysis.")
     if len(good_subjects) < 10:
