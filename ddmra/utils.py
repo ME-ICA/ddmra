@@ -268,7 +268,7 @@ def assess_significance(curve, null_curves, distances, intercept_distance, v2):
         value, so that negative slopes go *up* and positive slopes go *down*.
         Higher slopes (i.e., those going down) with lower p-values
         indicate focal effects of the QC metric on functional connectivity
-        (i.e., enhanced local connectivity and decrease long-distance connectivity due to the
+        (i.e., enhanced local connectivity and decreased long-distance connectivity due to the
         QC measure).
     """
     assert curve.ndim == distances.ndim == 1
