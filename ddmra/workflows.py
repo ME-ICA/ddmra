@@ -50,7 +50,7 @@ def run_analyses(
     analyses : tuple, optional
         The analyses to run. Must be one or more of "qcrsfc", "highlow", "scrubbing".
     verbose : bool, optional
-        If verbose, write out the correlation coefficients used by the QC:RSFC and high-how
+        If verbose, write out the correlation coefficients used by the QC:RSFC and high-low
         analyses. Default is False.
 
     Notes
@@ -69,7 +69,9 @@ def run_analyses(
     - ``[analysis]_analysis.png``: Figure for each analysis.
 
     If ``verbose`` is ``True``:
-    - ``z_corrs.tsv.gz``: Z-transformed correlation coefficients used by QC:RSFC and high-low
+    - ``z_corrs.tsv.gz``: Z-transformed correlation coefficients for the good files,
+        used by QC:RSFC and high-low analyses.
+    - ``mean_qcs.tsv.gz``: Mean QC values for the good files, used by QC:RSFC and high-low
         analyses.
     """
     ALLOWED_ANALYSES = ("qcrsfc", "highlow", "scrubbing")
@@ -191,9 +193,18 @@ def run_analyses(
                 op.join(out_dir, "z_corrs.tsv.gz"),
                 sep="\t",
                 line_terminator="\n",
-                index=False,
+                index=True,
+                index_label="distance",
             )
-            del corrs_df, file_names
+            mean_qc_df = pd.DataFrame(index=file_names, columns=["mean_qc"], data=mean_qc[:, None])
+            mean_qc_df.to_csv(
+                op.join(out_dir, "mean_qcs.tsv.gz"),
+                sep="\t",
+                line_terminator="\n",
+                index=True,
+                index_label="filename",
+            )
+            del corrs_df, mean_qc_df, file_names
 
     LGR.info(f"Retaining {len(good_subjects)}/{n_subjects} subjects for analysis.")
     if len(good_subjects) < 10:
