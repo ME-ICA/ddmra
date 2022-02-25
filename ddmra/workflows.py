@@ -24,6 +24,8 @@ def run_analyses(
     window=1000,
     analyses=("qcrsfc", "highlow", "scrubbing"),
     verbose=False,
+    pca_threshold=None,
+    outlier_threshold=None,
 ):
     """Run scrubbing, high-low motion, and QCRSFC analyses.
 
@@ -52,6 +54,14 @@ def run_analyses(
     verbose : bool, optional
         If verbose, write out the correlation coefficients used by the QC:RSFC and high-low
         analyses. Default is False.
+    pca_threshold : None or float or int, optional
+        If None, do not perform outlier detection at all.
+        If a float, perform PCA and retain components explain that proportion of the variance.
+        If an int, perform PCA and retain that number of components.
+    outlier_threshold : None or float, optional
+        If None, do not perform outlier detection at all.
+        If a float, flag any runs with Mahalanobis distance p-value < the float according to
+        chi-squared distribution.
 
     Notes
     -----
@@ -80,6 +90,21 @@ def run_analyses(
         "Parameter 'analyses' must be a tuple of one or more of the following values: "
         f"{', '.join(ALLOWED_ANALYSES)}"
     )
+
+    if (pca_threshold is None) and (outlier_threshold is None):
+        LGR.info("Not performing outlier detection.")
+    elif (pca_threshold is None) or (outlier_threshold is None):
+        raise ValueError("Both pca_threshold and outlier_threshold must be None or not None.")
+    elif isinstance(pca_threshold, int) and isinstance(outlier_threshold, float):
+        LGR.info(f"Performing outlier detection on first {pca_threshold} PCA components.")
+    elif isinstance(pca_threshold, float) and isinstance(outlier_threshold, float):
+        assert 0 < pca_threshold < 1, "Threshold must be between 0 and 1."
+        LGR.info(
+            "Performing outlier detection on PCA components explaining "
+            f"{pca_threshold * 100}% of the variance."
+        )
+    else:
+        raise ValueError("Bad inputs.")
 
     makedirs(out_dir, exist_ok=True)
 
@@ -163,6 +188,7 @@ def run_analyses(
         if skip_subject:
             continue
 
+        # This list will only include good subjects, so there's no need to reduce it later
         ts_all.append(raw_ts)
 
         if ("qcrsfc" in analyses) or ("highlow" in analyses):
@@ -178,36 +204,91 @@ def run_analyses(
     del (spheres_masker, atlas, coords)
 
     good_subjects = np.array(good_subjects)
-    qc = [qc[i] for i in good_subjects]
+    n_subjects_remaining = good_subjects.size
+    LGR.info(f"Retaining {n_subjects_remaining}/{n_subjects} after loading data.")
+
+    if "scrubbing" in analyses:
+        qc = [qc[i] for i in good_subjects]
 
     if ("qcrsfc" in analyses) or ("highlow" in analyses):
         z_corr_mats = z_corr_mats[good_subjects, :]
         mean_qc = mean_qc[good_subjects]
 
-        if verbose:
-            LGR.info("Saving z-transformed file-wise correlation coefficients")
-            # Assumes no periods in the filename except for the extension
-            file_names = [op.basename(files[i]).split(".")[0] for i in good_subjects]
-            corrs_df = pd.DataFrame(index=distances, columns=file_names, data=z_corr_mats.T)
-            corrs_df.to_csv(
-                op.join(out_dir, "z_corrs.tsv.gz"),
-                sep="\t",
-                line_terminator="\n",
-                index=True,
-                index_label="distance",
-            )
-            mean_qc_df = pd.DataFrame(index=file_names, columns=["mean_qc"], data=mean_qc[:, None])
-            mean_qc_df.to_csv(
-                op.join(out_dir, "mean_qcs.tsv.gz"),
-                sep="\t",
-                line_terminator="\n",
-                index=True,
-                index_label="filename",
-            )
-            del corrs_df, mean_qc_df, file_names
+        # Assumes no periods in the filename except for the extension
+        file_names = [op.basename(files[i]).split(".")[0] for i in good_subjects]
 
-    LGR.info(f"Retaining {len(good_subjects)}/{n_subjects} subjects for analysis.")
-    if len(good_subjects) < 10:
+    # Time to do some outlier detection
+    if pca_threshold is not None:
+        from scipy.stats import chi2
+        from sklearn.covariance import MinCovDet
+        from sklearn.decomposition import PCA
+        from sklearn.preprocessing import StandardScaler
+
+        # Define the PCA object
+        pca = PCA()
+
+        # Run PCA on scaled data and obtain the scores array
+        pca_components = pca.fit_transform(StandardScaler().fit_transform(z_corr_mats))
+
+        varex_cumsum = np.cumsum(pca.explained_variance_ratio_)
+        if isinstance(pca_threshold, float):
+            # Identify number of components that explain 95% of variance
+            n_components = np.where(varex_cumsum >= pca_threshold)[0][0]
+        else:
+            n_components = pca_threshold
+
+        perc_varex = varex_cumsum[n_components] * 100
+        LGR.info(f"{n_components} components selected ({perc_varex:.02f}% variance explained)")
+
+        # Select the components
+        pca_components = pca_components[:, :n_components]
+
+        # Fit a Minimum Covariance Determinant (MCD) robust estimator to data
+        robust_cov = MinCovDet().fit(pca_components)
+
+        # Get the Mahalanobis distance
+        mahalanobis_distances = robust_cov.mahalanobis(pca_components)
+
+        # Use chi2 threshold, based on
+        # https://towardsdatascience.com/multivariate-outlier-detection-in-python-e946cfc843b3
+        # Cutoff (threshold) value from chi-square distribution for detecting outliers
+        cutoff = chi2.ppf(1 - outlier_threshold, pca_components.shape[1])
+        outlier_idx = np.where(mahalanobis_distances > cutoff)[0]
+        keep_idx = np.where(mahalanobis_distances <= cutoff)[0]
+        LGR.info(f"Removing {outlier_idx.size} outliers of {mahalanobis_distances.size} runs.")
+        n_subjects_remaining = keep_idx.size
+
+        if ("qcrsfc" in analyses) or ("highlow" in analyses):
+            z_corr_mats = z_corr_mats[keep_idx, :]
+            mean_qc = mean_qc[keep_idx]
+            file_names = [file_names[i] for i in keep_idx]
+
+        if "scrubbing" in analyses:
+            ts_all = [ts_all[i] for i in keep_idx]
+            qc = [qc[i] for i in keep_idx]
+
+    if verbose and (("qcrsfc" in analyses) or ("highlow" in analyses)):
+        LGR.info("Saving z-transformed file-wise correlation coefficients")
+        corrs_df = pd.DataFrame(index=distances, columns=file_names, data=z_corr_mats.T)
+        corrs_df.to_csv(
+            op.join(out_dir, "z_corrs.tsv.gz"),
+            sep="\t",
+            line_terminator="\n",
+            index=True,
+            index_label="distance",
+        )
+        mean_qc_df = pd.DataFrame(index=file_names, columns=["mean_qc"], data=mean_qc[:, None])
+        mean_qc_df.to_csv(
+            op.join(out_dir, "mean_qcs.tsv.gz"),
+            sep="\t",
+            line_terminator="\n",
+            index=True,
+            index_label="filename",
+        )
+        del corrs_df, mean_qc_df, file_names
+
+    LGR.info(f"Retaining {n_subjects_remaining}/{n_subjects} subjects for analysis.")
+    if n_subjects_remaining < 10:
         raise ValueError("Too few subjects remaining for analysis.")
 
     analysis_values = pd.DataFrame(columns=analyses, index=distances)
