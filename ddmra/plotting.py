@@ -98,8 +98,8 @@ def plot_analysis(
     ax.set_ylabel(metric_name, fontsize=32, labelpad=-30)
     # Round to nearest decimal point at level you want.
     ylims = (
-        np.floor(np.min(data_points) * (10 ** ylim)) / (10 ** ylim),
-        np.ceil(np.max(data_points) * (10 ** ylim)) / (10 ** ylim),
+        np.floor(np.min(data_points) * (10**ylim)) / (10**ylim),
+        np.ceil(np.max(data_points) * (10**ylim)) / (10**ylim),
     )
     ax.set_yticks(ylims)
     ax.set_yticklabels(ylims, fontsize=32)
