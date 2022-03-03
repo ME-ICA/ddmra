@@ -443,7 +443,7 @@ def run_analyses(
         rank_smoothing_curves["scrubbing"] = scrubbing_ranks_smoothing_curves.copy()
 
         scrubbing_null_smoothing_curves = utils.calculate_smoothing_curve(
-            hl_null_values,
+            scrubbing_null_values,
             window,
             distances,
             smoothing_curve_distances,
