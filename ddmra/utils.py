@@ -233,6 +233,7 @@ def moving_average(values, window):
 
 
 def average_across_distances(values, distances):
+    assert values.size == distances.size
     nonnan_idx = np.where(~np.isnan(values))[0]
     unique_retained_distances, retained_distance_idxs = np.unique(
         distances[nonnan_idx],
@@ -283,6 +284,56 @@ def assess_significance(curve, null_curves, distances, intercept_distance, v2):
     p_inter = null_to_p(intercept, perm_intercepts, tail="upper")
     p_slope = null_to_p(slope, perm_slopes, tail="upper")
     return p_inter, p_slope
+
+
+def rank_to_p(rank_curve, n_iters, distances, intercept_distance, v2):
+    intercept_rank = get_val(distances, rank_curve, intercept_distance)
+    rank_diff = intercept_rank - get_val(distances, rank_curve, v2)
+    intercept_p = 1 - (intercept_rank / n_iters)
+    rank_diff_p = 1 - (rank_diff / n_iters)
+
+    return intercept_rank, intercept_p, rank_diff, rank_diff_p
+
+
+def get_rank(values, null_values):
+    assert values.ndim == 1
+    assert null_values.ndim == 2
+    assert values.shape[0] == null_values.shape[1]
+
+    ranks = np.empty(values.shape, int)
+    for i_val in range(values.shape[0]):
+        value = values[i_val]
+        null = null_values[:, i_val]
+        null = np.sort(null)
+        ranks[i_val] = np.searchsorted(null, value, side="left")
+
+    return ranks
+
+
+def calculate_smoothing_curve(values, window, distances, true_smoothing_curve_distances):
+    assert values.ndim in (1, 2)
+    values = values[None, :] if values.ndim == 1 else values
+
+    assert values.shape[1] == distances.shape[0]
+
+    for i_row in range(values.shape[0]):
+        smoothing_curve = moving_average(values[i_row, :], window)
+        smoothing_curve, test_smoothing_curve_distances = average_across_distances(
+            smoothing_curve,
+            distances,
+        )
+
+        assert np.array_equal(
+            true_smoothing_curve_distances, test_smoothing_curve_distances
+        ), f"{true_smoothing_curve_distances} != {test_smoothing_curve_distances}"
+
+        if i_row == 0:
+            smoothing_curves = np.empty((values.shape[0], smoothing_curve.shape[0]))
+
+        smoothing_curves[i_row, :] = smoothing_curve
+
+    smoothing_curves = np.squeeze(smoothing_curves)
+    return smoothing_curves
 
 
 @contextlib.contextmanager

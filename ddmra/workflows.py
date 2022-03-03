@@ -294,6 +294,9 @@ def run_analyses(
     analysis_values = pd.DataFrame(columns=analyses, index=distances)
     analysis_values.index.name = "distance"
 
+    ranks_df = pd.DataFrame(columns=analyses, index=distances)
+    ranks_df.index.name = "distance"
+
     # Create the smoothing_curves DataFrame
     ma_distances = utils.moving_average(distances, window)
     _, smoothing_curve_distances = utils.average_across_distances(ma_distances, distances)
@@ -366,35 +369,114 @@ def run_analyses(
     # Null distributions
     LGR.info("Building null distributions with permutations")
     null_curves_dict = {}
+    rank_smoothing_curves = pd.DataFrame(columns=analyses, index=smoothing_curve_distances)
+    rank_smoothing_curves.index.name = "distance"
+
     if ("qcrsfc" in analyses) or ("highlow" in analyses):
-        qcrsfc_null_smoothing_curves, hl_null_smoothing_curves = analysis.other_null_distributions(
+        qcrsfc_null_values, hl_null_values = analysis.other_null_distributions(
             mean_qc,
             z_corr_mats,
-            distances,
-            smoothing_curve_distances,
-            window=window,
             n_iters=n_iters,
             n_jobs=n_jobs,
         )
         if "qcrsfc" in analyses:
+            np.savez_compressed(op.join(out_dir, "qcrsfc_null.npz"), qcrsfc_null_values)
+            ranks_df["qcrsfc"] = utils.get_rank(
+                analysis_values["qcrsfc"].values, qcrsfc_null_values
+            )
+            qcrsfc_ranks_smoothing_curves = utils.calculate_smoothing_curve(
+                ranks_df["qcrsfc"].values,
+                window,
+                distances,
+                smoothing_curve_distances,
+            )
+            rank_smoothing_curves["qcrsfc"] = qcrsfc_ranks_smoothing_curves.copy()
+
+            qcrsfc_null_smoothing_curves = utils.calculate_smoothing_curve(
+                qcrsfc_null_values,
+                window,
+                distances,
+                smoothing_curve_distances,
+            )
             null_curves_dict["qcrsfc"] = qcrsfc_null_smoothing_curves.copy()
             del qcrsfc_null_smoothing_curves
 
         if "highlow" in analyses:
+            np.savez_compressed(op.join(out_dir, "hl_null.npz"), hl_null_values)
+            ranks_df["highlow"] = utils.get_rank(analysis_values["highlow"].values, hl_null_values)
+            hl_ranks_smoothing_curves = utils.calculate_smoothing_curve(
+                ranks_df["highlow"].values,
+                window,
+                distances,
+                smoothing_curve_distances,
+            )
+            rank_smoothing_curves["highlow"] = hl_ranks_smoothing_curves.copy()
+
+            hl_null_smoothing_curves = utils.calculate_smoothing_curve(
+                hl_null_values,
+                window,
+                distances,
+                smoothing_curve_distances,
+            )
             null_curves_dict["highlow"] = hl_null_smoothing_curves.copy()
             del hl_null_smoothing_curves
 
     if "scrubbing" in analyses:
-        null_curves_dict["scrubbing"] = analysis.scrubbing_null_distribution(
+        scrubbing_null_values = analysis.scrubbing_null_distribution(
             qc,
             ts_all,
-            distances,
-            smoothing_curve_distances,
             qc_thresh,
             edge_sorting_idx,
-            window=window,
             n_iters=n_iters,
             n_jobs=n_jobs,
+        )
+        np.savez_compressed(op.join(out_dir, "scrubbing_null.npz"), scrubbing_null_values)
+        ranks_df["scrubbing"] = utils.get_rank(
+            analysis_values["scrubbing"].values, scrubbing_null_values
+        )
+        scrubbing_ranks_smoothing_curves = utils.calculate_smoothing_curve(
+            ranks_df["scrubbing"].values,
+            window,
+            distances,
+            smoothing_curve_distances,
+        )
+        rank_smoothing_curves["scrubbing"] = scrubbing_ranks_smoothing_curves.copy()
+
+        scrubbing_null_smoothing_curves = utils.calculate_smoothing_curve(
+            hl_null_values,
+            window,
+            distances,
+            smoothing_curve_distances,
+        )
+        null_curves_dict["scrubbing"] = scrubbing_null_smoothing_curves.copy()
+        del scrubbing_null_smoothing_curves
+
+    ranks_df.reset_index(inplace=True)
+    ranks_df.to_csv(
+        op.join(out_dir, "ranks.tsv.gz"),
+        sep="\t",
+        line_terminator="\n",
+        index=False,
+    )
+    rank_smoothing_curves.reset_index(inplace=True)
+    rank_smoothing_curves.to_csv(
+        op.join(out_dir, "rank_smoothing_curves.tsv.gz"),
+        sep="\t",
+        line_terminator="\n",
+        index=False,
+    )
+
+    for analysis_name in analyses:
+        rank_inter, p_inter, rank_slope, p_slope = utils.rank_to_p(
+            rank_smoothing_curves[analysis_name].values,
+            n_iters,
+            rank_smoothing_curves["distance"].values,
+            35,
+            100,
+        )
+        LGR.info(
+            f"For {analysis_name} analysis, intercept (rank = {rank_inter}, p = {p_inter}); "
+            f"slope (rank = {rank_slope}, p = {p_slope})."
         )
 
     for ana, null_curve in null_curves_dict.items():
