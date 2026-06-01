@@ -2,7 +2,12 @@
 
 from importlib.metadata import PackageNotFoundError, version
 
-from .analysis import highlow_analysis, qcrsfc_analysis, scrubbing_analysis
+from .analysis import (
+    highlow_analysis,
+    qcrsfc_analysis,
+    qcrsfc_summary,
+    scrubbing_analysis,
+)
 from .plotting import plot_analysis, plot_results
 from .workflows import run_analyses, run_pipeline_comparison
 
@@ -16,6 +21,7 @@ __all__ = [
     "__version__",
     "highlow_analysis",
     "qcrsfc_analysis",
+    "qcrsfc_summary",
     "scrubbing_analysis",
     "run_analyses",
     "run_pipeline_comparison",

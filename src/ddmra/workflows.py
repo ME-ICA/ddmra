@@ -1027,6 +1027,11 @@ def run_analyses(
         The three arrays' keys are 'qcrsfc', 'highlow', and 'scrubbing'.
     - ``ranks.tsv.gz``: Diagnostic edgewise ranks of the observed analysis values against
         the edgewise null distributions. These ranks are not inferential p-values.
+    - ``qcrsfc_summary.tsv`` (only when the ``qcrsfc`` analysis is requested):
+        Descriptive QC-FC benchmark summaries, including the median absolute QC-FC
+        correlation and the percentage of edges with a significant QC-FC correlation
+        (Ciric et al., 2017; Parkes et al., 2018). These are diagnostics, not the
+        package's inferential result.
     - ``run_denoising_summary.tsv``: Run-level volume, confound-regressor, retention,
         and optional user-provided tDOF/data-loss accounting.
     - ``[analysis]_analysis.png``: Figure for each analysis.
@@ -1306,6 +1311,23 @@ def run_analyses(
         )
         smoothing_curves.loc[smoothing_curve_distances, "qcrsfc"] = qcrsfc_smoothing_curve
         del qcrsfc_smoothing_curve
+
+        # Descriptive QC-FC benchmark summaries (Ciric et al., 2017; Parkes et al., 2018).
+        qcrsfc_summary_metrics = analysis.qcrsfc_summary(
+            mean_qc, z_corr_mats, run_covariates=run_covariates
+        )
+        pd.DataFrame([qcrsfc_summary_metrics]).to_csv(
+            op.join(out_dir, "qcrsfc_summary.tsv"),
+            sep="\t",
+            lineterminator="\n",
+            index=False,
+        )
+        LGR.info(
+            f"QC:RSFC summary: median |QC-FC| r = "
+            f"{qcrsfc_summary_metrics['median_abs_qcfc']:.04f}; "
+            f"{qcrsfc_summary_metrics['percent_significant_edges']:.02f}% of edges "
+            f"significant at p < {qcrsfc_summary_metrics['alpha']} (uncorrected)."
+        )
 
     if "highlow" in analyses:
         # High-low motion analysis

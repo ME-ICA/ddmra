@@ -1,5 +1,7 @@
 """Tests for the ddmra.analysis module."""
 
+import math
+
 import numpy as np
 import pytest
 
@@ -92,6 +94,60 @@ def test_qcrsfc_analysis_shape_assertions():
             np.array([[1.0, 2.0, 3.0], [2.0, 3.0, 4.0]]),
             run_covariates=np.ones((3, 1)),
         )
+
+
+def test_qcrsfc_summary_metrics():
+    """qcrsfc_summary reports median |QC-FC| and the percentage of significant edges."""
+    mean_qcs = np.array([1.0, 2.0, 3.0, 4.0])
+    z_corr_mats = np.array(
+        [
+            [1.0, 4.0, 1.0],  # edge 0: r = +1, edge 1: r = -1, edge 2: r < 1
+            [2.0, 3.0, 2.0],
+            [3.0, 2.0, 3.0],
+            [4.0, 1.0, 5.0],
+        ]
+    )
+    summary = analysis.qcrsfc_summary(mean_qcs, z_corr_mats)
+
+    assert summary["n_runs"] == 4
+    assert summary["n_covariates"] == 0
+    assert summary["n_edges"] == 3
+    # Two edges are perfectly (anti)correlated, so the median absolute QC-FC is 1.0.
+    assert math.isclose(summary["median_abs_qcfc"], 1.0)
+    # The two perfectly correlated edges are always significant.
+    assert summary["n_significant_edges"] >= 2
+    assert math.isclose(
+        summary["percent_significant_edges"],
+        100.0 * summary["n_significant_edges"] / summary["n_edges"],
+    )
+    assert summary["alpha"] == 0.05
+
+
+def test_qcrsfc_summary_accounts_for_covariates():
+    """Covariates reduce the effective sample size used for QC-FC significance."""
+    covariate = np.repeat([0.0, 1.0], 4)
+    qc_residual = np.tile([-1.0, -0.5, 0.5, 1.0], 2)
+    mean_qcs = 10 * covariate + qc_residual
+    z_corr_mats = np.column_stack(
+        [
+            5 * covariate + np.array([1, -1, 1, -1, -1, 1, -1, 1]),
+            5 * covariate + qc_residual,
+        ]
+    )
+    summary = analysis.qcrsfc_summary(mean_qcs, z_corr_mats, run_covariates=covariate[:, None])
+    assert summary["n_runs"] == 8
+    assert summary["n_covariates"] == 1
+
+
+def test_qcrsfc_summary_validates_alpha_and_sample_size():
+    """qcrsfc_summary rejects an out-of-range alpha and too-small samples."""
+    mean_qcs = np.array([1.0, 2.0, 3.0, 4.0])
+    z_corr_mats = np.arange(12.0).reshape(4, 3) + np.array([0.0, 1.0, 2.0])
+    with pytest.raises(ValueError, match="alpha"):
+        analysis.qcrsfc_summary(mean_qcs, z_corr_mats, alpha=1.5)
+    # Two runs leave zero degrees of freedom for the correlation test.
+    with pytest.raises(ValueError, match="effective runs"):
+        analysis.qcrsfc_summary(np.array([1.0, 2.0]), np.array([[1.0, 2.0], [2.0, 1.0]]))
 
 
 def test_qcrsfc_analysis_rejects_nonfinite_inputs():

@@ -4,6 +4,7 @@ import logging
 
 import numpy as np
 from joblib import Parallel, delayed
+from scipy import stats
 from tqdm import tqdm
 
 from .utils import R2Z_CLIP, fast_pearson, r2z, tqdm_joblib
@@ -247,6 +248,41 @@ def _validate_qcrsfc_inputs(mean_qcs, z_corr_mats):
         raise ValueError(f"{n_bad_edges} FC edge(s) have zero variance across runs.")
 
 
+def _qcrsfc_correlations(mean_qcs, z_corr_mats, run_covariates=None):
+    """Compute edgewise QC-FC correlations and the effective sample size.
+
+    Returns the raw (non-z-transformed) Pearson correlation between mean QC and each
+    edge's connectivity, plus the effective number of runs available for inference
+    (the run count minus the number of covariates regressed out).
+    """
+    mean_qcs = np.asarray(mean_qcs, dtype=float)
+    z_corr_mats = np.asarray(z_corr_mats, dtype=float)
+
+    if mean_qcs.ndim != 1:
+        raise ValueError(f"mean_qcs must be a 1D array, not {mean_qcs.ndim}D.")
+    if z_corr_mats.ndim != 2:
+        raise ValueError(f"z_corr_mats must be a 2D array, not {z_corr_mats.ndim}D.")
+    if mean_qcs.shape[0] != z_corr_mats.shape[0]:
+        raise ValueError(
+            f"mean_qcs has {mean_qcs.shape[0]} runs but z_corr_mats has "
+            f"{z_corr_mats.shape[0]}."
+        )
+    _validate_qcrsfc_inputs(mean_qcs, z_corr_mats)
+
+    n_covariates = 0
+    if run_covariates is not None:
+        mean_qcs = _residualize(mean_qcs, run_covariates)
+        z_corr_mats = _residualize(z_corr_mats, run_covariates)
+        _validate_qcrsfc_inputs(mean_qcs, z_corr_mats)
+        # _residualize already validated that run_covariates is 2D.
+        n_covariates = np.asarray(run_covariates, dtype=float).shape[1]
+
+    # Correlate each ROI pair's z-value against QC measure (usually FD) across subjects.
+    qcrsfc_rs = fast_pearson(z_corr_mats.T, mean_qcs)
+    n_effective = mean_qcs.shape[0] - n_covariates
+    return qcrsfc_rs, n_effective
+
+
 def qcrsfc_analysis(mean_qcs, z_corr_mats, run_covariates=None):
     """Perform quality-control resting-state functional connectivity analysis.
 
@@ -277,29 +313,89 @@ def qcrsfc_analysis(mean_qcs, z_corr_mats, run_covariates=None):
        across participants, for each ROI-ROI pair.
     4. Z-transform the edge-wise correlation coefficients.
     """
-    mean_qcs = np.asarray(mean_qcs, dtype=float)
-    z_corr_mats = np.asarray(z_corr_mats, dtype=float)
+    qcrsfc_rs, _ = _qcrsfc_correlations(mean_qcs, z_corr_mats, run_covariates=run_covariates)
+    return r2z(qcrsfc_rs)
 
-    if mean_qcs.ndim != 1:
-        raise ValueError(f"mean_qcs must be a 1D array, not {mean_qcs.ndim}D.")
-    if z_corr_mats.ndim != 2:
-        raise ValueError(f"z_corr_mats must be a 2D array, not {z_corr_mats.ndim}D.")
-    if mean_qcs.shape[0] != z_corr_mats.shape[0]:
+
+def qcrsfc_summary(mean_qcs, z_corr_mats, run_covariates=None, alpha=0.05):
+    """Compute descriptive QC-FC benchmark summaries.
+
+    These are the standard QC-FC summary statistics reported in the resting-state fMRI
+    denoising literature (e.g., Ciric et al., 2017; Parkes et al., 2018): the median
+    absolute QC-FC correlation and the percentage of edges with a statistically
+    significant QC-FC correlation. Lower values indicate less residual association
+    between run quality and connectivity. These are descriptive diagnostics computed on
+    the raw (non-z-transformed) edge correlations; inferential claims in ``ddmra`` are
+    based on the smoothing-curve intercept and slope, not on these summaries.
+
+    Parameters
+    ----------
+    mean_qcs : numpy.ndarray of shape (n_subjects,)
+        QC measure (typically mean framewise displacement) across participants.
+    z_corr_mats : numpy.ndarray of shape (n_subjects, n_edges)
+        Z-transformed correlation coefficients for ROI-ROI pairs.
+    run_covariates : None or numpy.ndarray of shape (n_subjects, n_covariates), optional
+        Run-level covariates to adjust for before correlating QC and FC.
+    alpha : float, optional
+        Two-sided significance threshold applied to each edge's QC-FC correlation.
+        Default is 0.05. The test is uncorrected for multiple comparisons.
+
+    Returns
+    -------
+    summary : dict
+        Dictionary with the following keys:
+
+        - ``n_runs``: number of runs.
+        - ``n_covariates``: number of covariates regressed out.
+        - ``n_edges``: number of ROI-ROI edges.
+        - ``median_abs_qcfc``: median absolute QC-FC correlation across edges.
+        - ``mean_abs_qcfc``: mean absolute QC-FC correlation across edges.
+        - ``n_significant_edges``: number of edges with two-sided p < ``alpha``.
+        - ``percent_significant_edges``: percentage of edges with two-sided p < ``alpha``.
+        - ``alpha``: the significance threshold used.
+
+    Notes
+    -----
+    Edgewise significance uses the parametric two-sided test for a Pearson correlation,
+    with degrees of freedom reduced by the number of covariates. Under a well-denoised
+    pipeline with no residual QC-FC association, the percentage of significant edges
+    should approach ``100 * alpha``.
+    """
+    if not 0 < alpha < 1:
+        raise ValueError("alpha must be between 0 and 1.")
+
+    qcrsfc_rs, n_effective = _qcrsfc_correlations(
+        mean_qcs, z_corr_mats, run_covariates=run_covariates
+    )
+    n_runs = int(np.asarray(mean_qcs).shape[0])
+    df = n_effective - 2
+    if df < 1:
         raise ValueError(
-            f"mean_qcs has {mean_qcs.shape[0]} runs but z_corr_mats has "
-            f"{z_corr_mats.shape[0]}."
+            f"QC-FC significance requires at least 3 effective runs, but the effective "
+            f"degrees of freedom is {df} ({n_runs} runs minus {n_runs - n_effective} "
+            "covariates)."
         )
-    _validate_qcrsfc_inputs(mean_qcs, z_corr_mats)
 
-    if run_covariates is not None:
-        mean_qcs = _residualize(mean_qcs, run_covariates)
-        z_corr_mats = _residualize(z_corr_mats, run_covariates)
-        _validate_qcrsfc_inputs(mean_qcs, z_corr_mats)
+    abs_rs = np.abs(qcrsfc_rs)
+    # Two-sided parametric significance for each edge's QC-FC Pearson correlation.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t_stats = qcrsfc_rs * np.sqrt(df / (1.0 - qcrsfc_rs**2))
+    p_values = 2.0 * stats.t.sf(np.abs(t_stats), df)
+    # Perfect correlations give infinite t and a p-value of 0.
+    p_values = np.where(np.abs(qcrsfc_rs) >= 1.0, 0.0, p_values)
 
-    # Correlate each ROI pair's z-value against QC measure (usually FD) across subjects.
-    qcrsfc_rs = fast_pearson(z_corr_mats.T, mean_qcs)
-    qcrsfc_zs = r2z(qcrsfc_rs)
-    return qcrsfc_zs
+    n_edges = int(qcrsfc_rs.size)
+    n_significant = int(np.sum(p_values < alpha))
+    return {
+        "n_runs": n_runs,
+        "n_covariates": n_runs - n_effective,
+        "n_edges": n_edges,
+        "median_abs_qcfc": float(np.median(abs_rs)),
+        "mean_abs_qcfc": float(np.mean(abs_rs)),
+        "n_significant_edges": n_significant,
+        "percent_significant_edges": 100.0 * n_significant / n_edges,
+        "alpha": alpha,
+    }
 
 
 def _scrubbing_null_iter(qc_values, ts_all, qc_thresh, edge_sorting_idx, seed=0):

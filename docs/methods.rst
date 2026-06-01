@@ -148,6 +148,16 @@ Interpretation:
 - QC-FC is not a measure of neural signal preservation. It should be interpreted
   with data-loss and reliability or validity benchmarks when available.
 
+``ddmra`` also writes two descriptive QC-FC benchmark summaries to
+``qcrsfc_summary.tsv``: the median absolute QC-FC correlation and the percentage
+of edges with a significant QC-FC correlation (two-sided, uncorrected, at
+``alpha = 0.05``). These are the standard scalar QC-FC summaries reported in the
+denoising literature (Ciric et al., 2017; Parkes et al., 2018). Lower values
+indicate less residual association between run quality and connectivity, and
+under a pipeline with no residual QC-FC the percentage of significant edges
+should approach ``100 * alpha``. These summaries are descriptive diagnostics;
+inference in ``ddmra`` is based on the smoothing-curve intercept and slope.
+
 
 High-low QC analysis
 --------------------
@@ -240,6 +250,11 @@ Output files from ``run_analyses``
     Diagnostic edgewise ranks of observed values against edgewise null values.
     These ranks are not p-values and should not be interpreted as inferential
     evidence.
+
+``qcrsfc_summary.tsv``
+    Descriptive QC-FC benchmark summaries (median absolute QC-FC correlation and
+    percentage of significant edges), written only when the ``qcrsfc`` analysis is
+    requested.
 
 ``run_denoising_summary.tsv``
     Run-level accounting for input volumes, QC thresholding, confound counts,

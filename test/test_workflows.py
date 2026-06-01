@@ -547,6 +547,7 @@ def test_run_analyses_end_to_end(tmp_path, monkeypatch):
         "smoothing_curves.tsv.gz",
         "null_smoothing_curves.npz",
         "ranks.tsv.gz",
+        "qcrsfc_summary.tsv",
         "run_denoising_summary.tsv",
         "analysis_results.png",
         "log.tsv",
@@ -613,6 +614,45 @@ def test_run_analyses_scrubbing_only_skips_stability_warning(tmp_path, monkeypat
         )
 
     assert not any("unstable" in str(w.message) for w in caught)
+    # The QC-FC summary is only written when the qcrsfc analysis is requested.
+    assert not (out_dir / "qcrsfc_summary.tsv").exists()
+
+
+@pytest.mark.integration
+def test_run_analyses_writes_qcrsfc_summary(tmp_path, monkeypatch):
+    """The qcrsfc analysis writes the descriptive QC-FC benchmark summary file."""
+    monkeypatch.setattr(
+        workflows.datasets, "fetch_coords_power_2011", lambda *a, **k: _fake_power_atlas()
+    )
+
+    out_dir = tmp_path / "out"
+    files, qc = _write_synthetic_images(tmp_path)
+    workflows.run_analyses(
+        files,
+        qc,
+        out_dir=str(out_dir),
+        n_iters=2,
+        n_jobs=1,
+        window=_WINDOW,
+        analyses=("qcrsfc",),
+    )
+
+    summary = pd.read_table(out_dir / "qcrsfc_summary.tsv")
+    assert summary.shape[0] == 1
+    expected_columns = {
+        "n_runs",
+        "n_covariates",
+        "n_edges",
+        "median_abs_qcfc",
+        "mean_abs_qcfc",
+        "n_significant_edges",
+        "percent_significant_edges",
+        "alpha",
+    }
+    assert expected_columns.issubset(summary.columns)
+    row = summary.iloc[0]
+    assert 0 <= row["median_abs_qcfc"] <= 1
+    assert 0 <= row["percent_significant_edges"] <= 100
 
 
 @pytest.mark.integration
