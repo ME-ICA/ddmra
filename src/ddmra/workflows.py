@@ -304,6 +304,17 @@ def _is_nifti_path(path):
     return not path.endswith(cifti_suffixes) and path.endswith((".nii", ".nii.gz"))
 
 
+def _nifti_stem(path):
+    """Return a filename without its NIfTI extension, preserving internal periods."""
+    name = op.basename(str(path))
+    lower = name.lower()
+    for ext in (".nii.gz", ".nii"):
+        if lower.endswith(ext):
+            return name[: -len(ext)]
+    # Fall back to dropping only the final extension for non-NIfTI inputs.
+    return op.splitext(name)[0]
+
+
 def _load_pipeline_file_table(pipeline_file_table):
     """Load a run-by-pipeline file table from a DataFrame or TSV path."""
     if isinstance(pipeline_file_table, pd.DataFrame):
@@ -1203,8 +1214,7 @@ def run_analyses(
         if run_covariates is not None:
             run_covariates = run_covariates[good_subjects, :]
 
-        # Assumes no periods in the filename except for the extension
-        file_names = [op.basename(files[i]).split(".")[0] for i in good_subjects]
+        file_names = [_nifti_stem(files[i]) for i in good_subjects]
 
     # Time to do some outlier detection
     if pca_threshold is not None:

@@ -332,6 +332,18 @@ def test_count_confounds_supports_1d_and_rejects_bad_inputs():
         workflows._count_confounds([np.zeros((2, 2, 2))], n_subjects=1)
 
 
+def test_nifti_stem_preserves_internal_periods():
+    """NIfTI extensions are stripped without truncating names that contain periods."""
+    assert workflows._nifti_stem("sub-01_bold.nii.gz") == "sub-01_bold"
+    assert workflows._nifti_stem("sub-01_bold.nii") == "sub-01_bold"
+    # Internal periods (e.g., a smoothing kernel of 5.0 mm) must survive.
+    assert workflows._nifti_stem("/data/sub-02_desc-sm5.0_bold.nii.gz") == "sub-02_desc-sm5.0_bold"
+    # Extension matching is case-insensitive.
+    assert workflows._nifti_stem("SUB-03_BOLD.NII.GZ") == "SUB-03_BOLD"
+    # Non-NIfTI inputs fall back to dropping only the final extension.
+    assert workflows._nifti_stem("notes.v2.txt") == "notes.v2"
+
+
 def test_prepare_run_denoising_metrics_rejects_invalid_tables():
     """Optional denoising metrics must be complete numeric run-level tables."""
     with pytest.raises(TypeError, match="DataFrame"):
