@@ -24,7 +24,7 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
     qc_values : (N,) list
         List of (T,) arrays
     group_timeseries : (N,) list
-        List of (T, R) arrays
+        List of (R, T) arrays, where rows are ROIs and columns are timepoints.
     edge_sorting_idx : numpy.ndarray of shape (n_edges,)
         Sorting index for upper triangle (not including self-self edges) of correlation matrix.
         This will sort the 1D array by ascending physical distance of the ROI-ROI pairs.
@@ -59,16 +59,48 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
     7. Average the difference values across participants.
     """
     assert len(qc_values) == len(group_timeseries), f"{len(qc_values)} != {len(group_timeseries)}"
+    if not group_timeseries:
+        raise ValueError("At least one subject is required for scrubbing analysis.")
 
-    n_rois = group_timeseries[0].shape[0]
+    first_ts = np.asarray(group_timeseries[0])
+    first_qc = np.asarray(qc_values[0])
+    if first_ts.ndim != 2:
+        raise ValueError("Subject 0 time series must be a 2D array.")
+    if first_qc.ndim != 1:
+        raise ValueError("Subject 0 QC values must be a 1D array.")
+    if first_ts.shape[1] != first_qc.shape[0]:
+        raise ValueError(
+            "Scrubbing time series must be ROIs by timepoints, with one QC value per "
+            f"timepoint. Subject 0 has time series shape {first_ts.shape} and "
+            f"{first_qc.shape[0]} QC values."
+        )
+
+    n_rois = first_ts.shape[0]
     triu_idx = np.triu_indices(n_rois, k=1)
     n_pairs = len(triu_idx[0])
+    if edge_sorting_idx.size != n_pairs:
+        raise ValueError(
+            f"edge_sorting_idx has {edge_sorting_idx.size} entries, but {n_pairs} "
+            f"ROI pairs are expected for {n_rois} ROIs."
+        )
     n_subjects = len(group_timeseries)
     delta_zs = np.zeros((n_subjects, n_pairs))
     c = 0  # included subject counter
     for i_subj in range(n_subjects):
-        ts_arr = group_timeseries[i_subj]
-        qc_arr = qc_values[i_subj]
+        ts_arr = np.asarray(group_timeseries[i_subj])
+        qc_arr = np.asarray(qc_values[i_subj])
+        if ts_arr.ndim != 2:
+            raise ValueError(f"Subject {i_subj} time series must be a 2D array.")
+        if qc_arr.ndim != 1:
+            raise ValueError(f"Subject {i_subj} QC values must be a 1D array.")
+        if ts_arr.shape[0] != n_rois:
+            raise ValueError("All subjects must have the same number of ROIs.")
+        if ts_arr.shape[1] != qc_arr.shape[0]:
+            raise ValueError(
+                "Scrubbing time series must be ROIs by timepoints, with one QC value per "
+                f"timepoint. Subject {i_subj} has time series shape {ts_arr.shape} and "
+                f"{qc_arr.shape[0]} QC values."
+            )
         keep_idx = qc_arr <= qc_thresh
 
         # Subjects with no timepoints excluded or with more than 50% excluded
@@ -90,6 +122,11 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
 
     # Remove extra rows corresponding to bad subjects
     delta_zs = delta_zs[:c, :]
+    if c == 0:
+        raise ValueError(
+            "No subjects retained in scrubbing analysis. At least one subject must have "
+            "some censored volumes and retain at least 50% of volumes."
+        )
 
     # Average over subjects
     mean_delta_z = np.mean(delta_zs, axis=0)
@@ -178,7 +215,8 @@ def qcrsfc_analysis(mean_qcs, z_corr_mats):
 
 
 def _scrubbing_null_iter(qc_values, ts_all, qc_thresh, edge_sorting_idx, seed=0):
-    perm_qcs = [np.random.RandomState(seed=seed).permutation(perm_qc) for perm_qc in qc_values]
+    rng = np.random.RandomState(seed=seed)
+    perm_qcs = [rng.permutation(perm_qc) for perm_qc in qc_values]
     ts_all = [ts.copy() for ts in ts_all]
 
     perm_mean_delta_zs = scrubbing_analysis(
@@ -206,7 +244,7 @@ def scrubbing_null_distribution(
     ----------
     qc_values : list of n_subjects length containing numpy.ndarray of shape (n_timepoints,)
         QC time series for each participant.
-    ts_all : list of n_subjects length containing numpy.ndarray of shape (n_timepoints, n_rois)
+    ts_all : list of n_subjects length containing numpy.ndarray of shape (n_rois, n_timepoints)
         ROI time series for each participant.
     qc_thresh : float
         QC threshold used to identify bad volumes (i.e., scrub).

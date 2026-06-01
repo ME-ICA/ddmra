@@ -118,6 +118,26 @@ def test_scrubbing_analysis_length_assertion():
         analysis.scrubbing_analysis([qc, qc], [ts], np.arange(3))
 
 
+def test_scrubbing_analysis_rejects_time_by_roi_input():
+    """Time-by-ROI arrays raise a clear error instead of correlating timepoints."""
+    rng = np.random.RandomState(0)
+    qc = np.concatenate([np.full(10, 0.1), np.full(10, 0.9)])
+    ts_time_by_roi = rng.normal(size=(20, 3))
+
+    with pytest.raises(ValueError, match="ROIs by timepoints"):
+        analysis.scrubbing_analysis([qc], [ts_time_by_roi], np.arange(3), qc_thresh=0.2)
+
+
+def test_scrubbing_analysis_no_qualifying_subjects_raises():
+    """Scrubbing reports a clear error when no subjects have usable censoring."""
+    rng = np.random.RandomState(0)
+    ts = rng.normal(size=(3, 20))
+    qc_all_kept = np.full(20, 0.1)
+
+    with pytest.raises(ValueError, match="No subjects retained"):
+        analysis.scrubbing_analysis([qc_all_kept], [ts], np.arange(3), qc_thresh=0.2)
+
+
 def _make_scrubbing_inputs(n_subjects=4, n_rois=3, n_tps=20, seed=0):
     rng = np.random.RandomState(seed)
     qc_values = [np.concatenate([np.full(10, 0.1), np.full(10, 0.9)]) for _ in range(n_subjects)]
@@ -139,6 +159,23 @@ def test_scrubbing_null_distribution_shape_and_determinism():
     assert out1.shape == (n_iters, 3)
     # Seeds are fixed per-iteration, so repeated calls are identical.
     assert np.array_equal(out1, out2)
+
+
+def test_scrubbing_null_iter_advances_rng_across_subjects(monkeypatch):
+    """Within an iteration, each subject should get an independent permutation draw."""
+    captured_qcs = []
+
+    def capture_qcs(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=0.2, perm=True):
+        captured_qcs.extend(qc_values)
+        return np.zeros(edge_sorting_idx.size)
+
+    monkeypatch.setattr(analysis, "scrubbing_analysis", capture_qcs)
+    qcs = [np.arange(20), np.arange(20)]
+    ts_all = [np.zeros((3, 20)), np.zeros((3, 20))]
+    analysis._scrubbing_null_iter(qcs, ts_all, qc_thresh=0.2, edge_sorting_idx=np.arange(3), seed=0)
+
+    assert len(captured_qcs) == 2
+    assert not np.array_equal(captured_qcs[0], captured_qcs[1])
 
 
 def test_other_null_distributions_shape_and_determinism():
