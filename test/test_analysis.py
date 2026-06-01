@@ -172,7 +172,9 @@ def test_scrubbing_null_iter_advances_rng_across_subjects(monkeypatch):
     monkeypatch.setattr(analysis, "scrubbing_analysis", capture_qcs)
     qcs = [np.arange(20), np.arange(20)]
     ts_all = [np.zeros((3, 20)), np.zeros((3, 20))]
-    analysis._scrubbing_null_iter(qcs, ts_all, qc_thresh=0.2, edge_sorting_idx=np.arange(3), seed=0)
+    analysis._scrubbing_null_iter(
+        qcs, ts_all, qc_thresh=0.2, edge_sorting_idx=np.arange(3), seed=0
+    )
 
     assert len(captured_qcs) == 2
     assert not np.array_equal(captured_qcs[0], captured_qcs[1])

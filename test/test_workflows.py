@@ -13,6 +13,7 @@ import types
 import nibabel as nib
 import numpy as np
 import pytest
+from nilearn.maskers import NiftiLabelsMasker, NiftiSpheresMasker
 
 from ddmra import workflows
 
@@ -125,6 +126,20 @@ def _fake_power_atlas():
     return types.SimpleNamespace(rois=rois)
 
 
+def _write_synthetic_label_atlas(tmp_path):
+    """Write a tiny labels atlas aligned to the synthetic test images."""
+    labels = np.zeros(IMG_SHAPE[:3], dtype=np.int16)
+    inv_affine = np.linalg.inv(IMG_AFFINE)
+    for label, coord in enumerate(ATLAS_COORDS, start=1):
+        ijk = np.rint(nib.affines.apply_affine(inv_affine, coord)).astype(int)
+        labels[tuple(ijk)] = label
+
+    atlas_img = nib.Nifti1Image(labels, IMG_AFFINE)
+    atlas_path = tmp_path / "synthetic_labels_atlas.nii.gz"
+    atlas_img.to_filename(atlas_path)
+    return atlas_path
+
+
 def _write_synthetic_images(tmp_path, n_subjects=12, seed=1):
     """Write ``n_subjects`` random 4D NIfTI files and return their paths + QC arrays."""
     rng = np.random.RandomState(seed)
@@ -137,6 +152,27 @@ def _write_synthetic_images(tmp_path, n_subjects=12, seed=1):
         files.append(path)
         qc.append(rng.uniform(0, 0.4, size=IMG_SHAPE[-1]))
     return files, qc
+
+
+def test_build_atlas_masker_uses_nilearn_sphere_fetcher(monkeypatch):
+    """A string atlas name is fetched as coordinates and wrapped in a spheres masker."""
+    monkeypatch.setattr(
+        workflows.datasets, "fetch_coords_power_2011", lambda *a, **k: _fake_power_atlas()
+    )
+    masker, coords = workflows._build_atlas_masker("power_2011", sphere_radius=4.0)
+
+    assert isinstance(masker, NiftiSpheresMasker)
+    assert masker.radius == 4.0
+    assert np.array_equal(coords, ATLAS_COORDS)
+
+
+def test_build_atlas_masker_uses_labels_file(tmp_path):
+    """An existing atlas file is loaded as a labels masker."""
+    atlas_path = _write_synthetic_label_atlas(tmp_path)
+    masker, coords = workflows._build_atlas_masker(atlas_path)
+
+    assert isinstance(masker, NiftiLabelsMasker)
+    assert coords.shape == ATLAS_COORDS.shape
 
 
 @pytest.mark.integration
@@ -178,6 +214,28 @@ def test_run_analyses_end_to_end(tmp_path, monkeypatch):
     logged_ps = [float(p) for p in re.findall(r"p = ([0-9.]+)", log_text)]
     assert logged_ps
     assert all(0 <= p <= 1 for p in logged_ps)
+
+
+@pytest.mark.integration
+def test_run_analyses_with_labels_atlas_file(tmp_path):
+    """The full workflow supports a local labels image atlas."""
+    out_dir = tmp_path / "out"
+    files, qc = _write_synthetic_images(tmp_path)
+    atlas_path = _write_synthetic_label_atlas(tmp_path)
+
+    workflows.run_analyses(
+        files,
+        qc,
+        out_dir=str(out_dir),
+        n_iters=2,
+        n_jobs=1,
+        window=_WINDOW,
+        analyses=("qcrsfc", "highlow"),
+        atlas=atlas_path,
+    )
+
+    assert (out_dir / "analysis_values.tsv.gz").is_file()
+    assert (out_dir / "analysis_results.png").is_file()
 
 
 @pytest.mark.integration

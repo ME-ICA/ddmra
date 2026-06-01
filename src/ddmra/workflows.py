@@ -2,16 +2,90 @@
 
 import logging
 import os.path as op
-from os import makedirs
+from os import PathLike, makedirs
 
 import numpy as np
 import pandas as pd
-from nilearn import datasets, input_data
+from nilearn import datasets
+from nilearn.maskers import NiftiLabelsMasker, NiftiSpheresMasker
+from nilearn.plotting import find_parcellation_cut_coords
 from scipy.spatial.distance import pdist, squareform
 
 from . import analysis, plotting, utils
 
 LGR = logging.getLogger("workflows")
+
+
+def _masker_kwargs():
+    """Return shared masker settings for atlas time series extraction."""
+    return {
+        "t_r": None,
+        "smoothing_fwhm": None,
+        "detrend": False,
+        "standardize": False,
+        "low_pass": None,
+        "high_pass": None,
+    }
+
+
+def _sphere_fetcher_name(atlas):
+    """Convert a user-facing sphere atlas name to a nilearn fetcher name."""
+    atlas = atlas.lower().replace("-", "_")
+    if atlas.startswith("fetch_coords_"):
+        return atlas
+    if atlas.startswith("coords_"):
+        return f"fetch_{atlas}"
+    return f"fetch_coords_{atlas}"
+
+
+def _coords_from_sphere_atlas(atlas):
+    """Fetch coordinate atlas centers from nilearn.datasets."""
+    fetcher_name = _sphere_fetcher_name(atlas)
+    fetcher = getattr(datasets, fetcher_name, None)
+    if fetcher is None:
+        fetchers = sorted(
+            name.removeprefix("fetch_coords_")
+            for name in dir(datasets)
+            if name.startswith("fetch_coords_")
+        )
+        raise ValueError(
+            f"Unknown sphere atlas '{atlas}'. Available nilearn coordinate atlases are: "
+            f"{', '.join(fetchers)}."
+        )
+
+    fetched_atlas = fetcher()
+    if hasattr(fetched_atlas, "rois"):
+        rois = fetched_atlas.rois
+        coords = np.vstack((rois["x"], rois["y"], rois["z"])).T
+    elif all(hasattr(fetched_atlas, axis) for axis in ("x", "y", "z")):
+        coords = np.vstack((fetched_atlas.x, fetched_atlas.y, fetched_atlas.z)).T
+    else:
+        raise ValueError(f"Coordinate atlas '{atlas}' does not expose x/y/z ROI coordinates.")
+
+    return np.asarray(coords, dtype=float)
+
+
+def _build_atlas_masker(atlas="power_2011", sphere_radius=5.0):
+    """Create a Nilearn masker and ROI coordinates from an atlas specification."""
+    kwargs = _masker_kwargs()
+
+    if isinstance(atlas, PathLike) or (isinstance(atlas, str) and op.isfile(atlas)):
+        coords = find_parcellation_cut_coords(atlas)
+        masker = NiftiLabelsMasker(labels_img=atlas, **kwargs)
+    elif isinstance(atlas, str):
+        coords = _coords_from_sphere_atlas(atlas)
+        masker = NiftiSpheresMasker(seeds=coords, radius=sphere_radius, **kwargs)
+    else:
+        raise TypeError("atlas must be a path to a labels image or a nilearn sphere atlas name.")
+
+    if coords.ndim != 2 or coords.shape[1] != 3:
+        raise ValueError(f"Atlas coordinates must have shape (n_rois, 3), not {coords.shape}.")
+    if coords.shape[0] < 2:
+        raise ValueError("Atlas must define at least two ROIs.")
+    if not np.all(np.isfinite(coords)):
+        raise ValueError("Atlas coordinates must all be finite.")
+
+    return masker, coords
 
 
 def _select_n_pca_components(varex_cumsum, pca_threshold):
@@ -44,6 +118,8 @@ def run_analyses(
     verbose=False,
     pca_threshold=None,
     outlier_threshold=None,
+    atlas="power_2011",
+    sphere_radius=5.0,
 ):
     """Run scrubbing, high-low motion, and QCRSFC analyses.
 
@@ -80,6 +156,17 @@ def run_analyses(
         If None, do not perform outlier detection at all.
         If a float, flag any runs with Mahalanobis distance p-value < the float according to
         chi-squared distribution.
+    atlas : str or path-like, optional
+        Atlas to use for ROI time series extraction.
+        If a path to an existing file, the file is treated as a labels image and loaded with
+        :class:`nilearn.maskers.NiftiLabelsMasker`.
+        Otherwise, the value is treated as the name of a coordinate atlas available through
+        :mod:`nilearn.datasets`, such as ``"power_2011"``, ``"dosenbach_2010"``, or
+        ``"seitzman_2018"``, and loaded with :class:`nilearn.maskers.NiftiSpheresMasker`.
+        Default is ``"power_2011"``.
+    sphere_radius : float, optional
+        Radius in millimeters for sphere atlases. Ignored when ``atlas`` is a labels image.
+        Default is 5.0.
 
     Notes
     -----
@@ -144,8 +231,7 @@ def run_analyses(
     assert len(qc) == n_subjects, f"{len(qc)} != {n_subjects}"
 
     # Load atlas and associated masker
-    atlas = datasets.fetch_coords_power_2011()
-    coords = np.vstack((atlas.rois["x"], atlas.rois["y"], atlas.rois["z"])).T
+    atlas_masker, coords = _build_atlas_masker(atlas=atlas, sphere_radius=sphere_radius)
     n_rois = coords.shape[0]
     triu_idx = np.triu_indices(n_rois, k=1)
     distances = squareform(pdist(coords))
@@ -159,16 +245,6 @@ def run_analyses(
     distances = distances[edge_sorting_idx]
 
     LGR.info("Creating masker")
-    spheres_masker = input_data.NiftiSpheresMasker(
-        seeds=coords,
-        radius=5.0,
-        t_r=None,
-        smoothing_fwhm=None,
-        detrend=False,
-        standardize=False,
-        low_pass=None,
-        high_pass=None,
-    )
 
     if ("qcrsfc" in analyses) or ("highlow" in analyses):
         # prep for qcrsfc and high-low motion analyses
@@ -186,9 +262,9 @@ def run_analyses(
     for i_subj in range(n_subjects):
         skip_subject = False
         if confounds:
-            raw_ts = spheres_masker.fit_transform(files[i_subj], confounds=confounds[i_subj]).T
+            raw_ts = atlas_masker.fit_transform(files[i_subj], confounds=confounds[i_subj]).T
         else:
-            raw_ts = spheres_masker.fit_transform(files[i_subj]).T
+            raw_ts = atlas_masker.fit_transform(files[i_subj]).T
 
         assert raw_ts.shape[0] == n_rois, f"{raw_ts.shape[0]} != {n_rois}"
 
@@ -221,7 +297,7 @@ def run_analyses(
 
         good_subjects.append(i_subj)
 
-    del (spheres_masker, atlas, coords)
+    del (atlas_masker, coords)
 
     good_subjects = np.array(good_subjects)
     n_subjects_remaining = good_subjects.size
@@ -305,7 +381,7 @@ def run_analyses(
     if n_subjects_remaining < 10:
         raise ValueError("Too few subjects remaining for analysis.")
 
-    analysis_values = pd.DataFrame(columns=analyses, index=distances)
+    analysis_values = pd.DataFrame(columns=analyses, index=distances, dtype=float)
     analysis_values.index.name = "distance"
 
     ranks_df = pd.DataFrame(columns=analyses, index=distances)
@@ -314,7 +390,7 @@ def run_analyses(
     # Create the smoothing_curves DataFrame
     ma_distances = utils.moving_average(distances, window)
     _, smoothing_curve_distances = utils.average_across_distances(ma_distances, distances)
-    smoothing_curves = pd.DataFrame(columns=analyses, index=smoothing_curve_distances)
+    smoothing_curves = pd.DataFrame(columns=analyses, index=smoothing_curve_distances, dtype=float)
     smoothing_curves.index.name = "distance"
 
     if "qcrsfc" in analyses:
