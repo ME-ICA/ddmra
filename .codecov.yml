@@ -15,7 +15,6 @@ coverage:
         threshold: 0
 
 ignore:
-  - 'ddmra/tests/'
-  - 'ddmra/due.py'
-  - 'ddmra/_version.py'
-  - 'ddmra/info.py'
+  - 'test/'
+  - 'src/ddmra/due.py'
+  - 'src/ddmra/_version.py'

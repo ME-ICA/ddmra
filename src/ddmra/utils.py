@@ -1,4 +1,5 @@
 """Miscellaneous utility functions for the DDMRA package."""
+
 import contextlib
 
 import joblib
@@ -323,9 +324,9 @@ def calculate_smoothing_curve(values, window, distances, true_smoothing_curve_di
             distances,
         )
 
-        assert np.array_equal(
-            true_smoothing_curve_distances, test_smoothing_curve_distances
-        ), f"{true_smoothing_curve_distances} != {test_smoothing_curve_distances}"
+        assert np.array_equal(true_smoothing_curve_distances, test_smoothing_curve_distances), (
+            f"{true_smoothing_curve_distances} != {test_smoothing_curve_distances}"
+        )
 
         if i_row == 0:
             smoothing_curves = np.empty((values.shape[0], smoothing_curve.shape[0]))

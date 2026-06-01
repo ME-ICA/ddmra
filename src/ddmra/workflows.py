@@ -1,4 +1,5 @@
 """Perform distance-dependent motion-related artifact analyses."""
+
 import logging
 import os.path as op
 from os import makedirs
@@ -273,7 +274,7 @@ def run_analyses(
         corrs_df.to_csv(
             op.join(out_dir, "z_corrs.tsv.gz"),
             sep="\t",
-            line_terminator="\n",
+            lineterminator="\n",
             index=True,
             index_label="distance",
         )
@@ -281,7 +282,7 @@ def run_analyses(
         mean_qc_df.to_csv(
             op.join(out_dir, "mean_qcs.tsv.gz"),
             sep="\t",
-            line_terminator="\n",
+            lineterminator="\n",
             index=True,
             index_label="filename",
         )
@@ -312,9 +313,9 @@ def run_analyses(
             qcrsfc_smoothing_curve,
             distances,
         )
-        assert np.array_equal(
-            smoothing_curve_distances, qcrsfc_smoothing_curve_distances
-        ), f"{smoothing_curve_distances} != {qcrsfc_smoothing_curve_distances}"
+        assert np.array_equal(smoothing_curve_distances, qcrsfc_smoothing_curve_distances), (
+            f"{smoothing_curve_distances} != {qcrsfc_smoothing_curve_distances}"
+        )
         smoothing_curves.loc[smoothing_curve_distances, "qcrsfc"] = qcrsfc_smoothing_curve
         del qcrsfc_smoothing_curve
 
@@ -327,9 +328,9 @@ def run_analyses(
             hl_smoothing_curve,
             distances,
         )
-        assert np.array_equal(
-            smoothing_curve_distances, hl_smoothing_curve_distances
-        ), f"{smoothing_curve_distances} != {hl_smoothing_curve_distances}"
+        assert np.array_equal(smoothing_curve_distances, hl_smoothing_curve_distances), (
+            f"{smoothing_curve_distances} != {hl_smoothing_curve_distances}"
+        )
         smoothing_curves.loc[smoothing_curve_distances, "highlow"] = hl_smoothing_curve
         del hl_smoothing_curve
 
@@ -344,9 +345,9 @@ def run_analyses(
             scrub_smoothing_curve,
             distances,
         )
-        assert np.array_equal(
-            smoothing_curve_distances, scrub_smoothing_curve_distances
-        ), f"{smoothing_curve_distances} != {scrub_smoothing_curve_distances}"
+        assert np.array_equal(smoothing_curve_distances, scrub_smoothing_curve_distances), (
+            f"{smoothing_curve_distances} != {scrub_smoothing_curve_distances}"
+        )
         smoothing_curves.loc[smoothing_curve_distances, "scrubbing"] = scrub_smoothing_curve
         del scrub_smoothing_curve
 
@@ -356,13 +357,13 @@ def run_analyses(
     analysis_values.to_csv(
         op.join(out_dir, "analysis_values.tsv.gz"),
         sep="\t",
-        line_terminator="\n",
+        lineterminator="\n",
         index=False,
     )
     smoothing_curves.to_csv(
         op.join(out_dir, "smoothing_curves.tsv.gz"),
         sep="\t",
-        line_terminator="\n",
+        lineterminator="\n",
         index=False,
     )
 
@@ -455,14 +456,14 @@ def run_analyses(
     ranks_df.to_csv(
         op.join(out_dir, "ranks.tsv.gz"),
         sep="\t",
-        line_terminator="\n",
+        lineterminator="\n",
         index=False,
     )
     rank_smoothing_curves.reset_index(inplace=True)
     rank_smoothing_curves.to_csv(
         op.join(out_dir, "rank_smoothing_curves.tsv.gz"),
         sep="\t",
-        line_terminator="\n",
+        lineterminator="\n",
         index=False,
     )
 

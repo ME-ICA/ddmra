@@ -5,6 +5,7 @@ on motion (i.e., a mix of global and focal effects), while the rank for the
 slope (difference in smoothing curve at 100mm and 35mm) indexes distance
 dependence (i.e., focal effects).
 """
+
 import os.path as op
 
 import matplotlib.pyplot as plt
@@ -156,6 +157,8 @@ def plot_results(in_dir):
     n_analyses = len(found_analyses)
 
     fig, axes = plt.subplots(figsize=(8, 8 * n_analyses), nrows=n_analyses)
+    # plt.subplots returns a bare Axes (not an array) when nrows == 1.
+    axes = np.atleast_1d(axes)
 
     for i_analysis, analysis_type in enumerate(found_analyses):
         label = METRIC_LABELS[analysis_type]

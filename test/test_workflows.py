@@ -1,0 +1,244 @@
+"""Tests for the ddmra.workflows module.
+
+The input-validation tests are fast and have no external dependencies. The
+end-to-end ``test_run_analyses_*`` test exercises the full pipeline against a
+small synthetic atlas (patched in to avoid any network access) and synthetic
+4D images, and is marked as an integration test.
+"""
+
+import os.path as op
+import types
+
+import nibabel as nib
+import numpy as np
+import pytest
+
+from ddmra import workflows
+
+# ---------------------------------------------------------------------------- #
+#                            Input validation                                  #
+# ---------------------------------------------------------------------------- #
+
+
+def test_run_analyses_requires_at_least_one_analysis(tmp_path):
+    """An empty ``analyses`` tuple is rejected before any heavy work."""
+    with pytest.raises(AssertionError, match="At least one analysis"):
+        workflows.run_analyses(["a"], [np.zeros(5)], out_dir=str(tmp_path), analyses=())
+
+
+def test_run_analyses_rejects_unknown_analysis(tmp_path):
+    """Unknown analysis names are rejected."""
+    with pytest.raises(AssertionError, match="must be a tuple"):
+        workflows.run_analyses(["a"], [np.zeros(5)], out_dir=str(tmp_path), analyses=("bogus",))
+
+
+def test_run_analyses_requires_both_outlier_thresholds(tmp_path):
+    """Specifying only one of pca/outlier thresholds is an error."""
+    with pytest.raises(ValueError, match="Both pca_threshold and outlier_threshold"):
+        workflows.run_analyses(
+            ["a"], [np.zeros(5)], out_dir=str(tmp_path), pca_threshold=5, outlier_threshold=None
+        )
+
+
+def test_run_analyses_pca_threshold_out_of_range(tmp_path):
+    """A float pca_threshold must be between 0 and 1."""
+    with pytest.raises(AssertionError, match="between 0 and 1"):
+        workflows.run_analyses(
+            ["a"],
+            [np.zeros(5)],
+            out_dir=str(tmp_path),
+            pca_threshold=1.5,
+            outlier_threshold=0.05,
+        )
+
+
+def test_run_analyses_bad_threshold_types(tmp_path):
+    """Unsupported threshold type combinations raise a 'Bad inputs' error."""
+    with pytest.raises(ValueError, match="Bad inputs"):
+        workflows.run_analyses(
+            ["a"],
+            [np.zeros(5)],
+            out_dir=str(tmp_path),
+            pca_threshold="not-a-number",
+            outlier_threshold=0.05,
+        )
+
+
+def test_run_analyses_qc_length_mismatch(tmp_path):
+    """The number of QC arrays must match the number of files."""
+    with pytest.raises(AssertionError):
+        workflows.run_analyses(["a", "b"], [np.zeros(5)], out_dir=str(tmp_path))
+
+
+# ---------------------------------------------------------------------------- #
+#                            End-to-end pipeline                               #
+# ---------------------------------------------------------------------------- #
+
+
+# 12 ROI coordinates (in mm) laid out along a line with varied gaps. This gives
+# ROI-pair distances spanning ~15 mm up to ~240 mm, so the smoothing curve
+# straddles the 35 mm and 100 mm points that run_analyses evaluates. The minimum
+# gap (15 mm) exceeds twice the 5 mm sphere radius, so no spheres overlap.
+_X_POSITIONS = [0, 15, 30, 50, 75, 100, 120, 140, 160, 180, 210, 240]
+ATLAS_COORDS = np.array([[x, 90.0, 90.0] for x in _X_POSITIONS], dtype=float)
+IMG_SHAPE = (26, 12, 12, 40)
+IMG_AFFINE = np.diag([10.0, 10.0, 10.0, 1.0])  # 10 mm voxels -> FOV spans the coords above
+_WINDOW = 4  # small smoothing window so the curve retains its extreme distances
+
+
+def _fake_power_atlas():
+    """Build a tiny stand-in for nilearn's Power 2011 coordinate atlas."""
+    rois = {"x": ATLAS_COORDS[:, 0], "y": ATLAS_COORDS[:, 1], "z": ATLAS_COORDS[:, 2]}
+    return types.SimpleNamespace(rois=rois)
+
+
+def _write_synthetic_images(tmp_path, n_subjects=12, seed=1):
+    """Write ``n_subjects`` random 4D NIfTI files and return their paths + QC arrays."""
+    rng = np.random.RandomState(seed)
+    files, qc = [], []
+    for i in range(n_subjects):
+        data = rng.normal(size=IMG_SHAPE).astype(np.float32)
+        img = nib.Nifti1Image(data, IMG_AFFINE)
+        path = op.join(tmp_path, f"sub-{i:02d}_bold.nii.gz")
+        img.to_filename(path)
+        files.append(path)
+        qc.append(rng.uniform(0, 0.4, size=IMG_SHAPE[-1]))
+    return files, qc
+
+
+@pytest.mark.integration
+def test_run_analyses_end_to_end(tmp_path, monkeypatch):
+    """Run the full workflow and confirm all expected output files are written."""
+    # Patch the atlas fetch so the pipeline uses a tiny, network-free atlas.
+    monkeypatch.setattr(
+        workflows.datasets, "fetch_coords_power_2011", lambda *a, **k: _fake_power_atlas()
+    )
+
+    out_dir = tmp_path / "out"
+    files, qc = _write_synthetic_images(tmp_path)
+
+    workflows.run_analyses(
+        files,
+        qc,
+        out_dir=str(out_dir),
+        n_iters=2,
+        n_jobs=1,
+        window=_WINDOW,
+        analyses=("qcrsfc", "highlow", "scrubbing"),
+    )
+
+    expected = [
+        "analysis_values.tsv.gz",
+        "smoothing_curves.tsv.gz",
+        "null_smoothing_curves.npz",
+        "ranks.tsv.gz",
+        "rank_smoothing_curves.tsv.gz",
+        "analysis_results.png",
+        "log.tsv",
+    ]
+    for name in expected:
+        assert (out_dir / name).is_file(), f"Missing expected output: {name}"
+
+
+@pytest.mark.integration
+def test_run_analyses_verbose_writes_extra_files(tmp_path, monkeypatch):
+    """verbose=True additionally writes the z-correlation and mean-QC tables."""
+    monkeypatch.setattr(
+        workflows.datasets, "fetch_coords_power_2011", lambda *a, **k: _fake_power_atlas()
+    )
+    out_dir = tmp_path / "out"
+    files, qc = _write_synthetic_images(tmp_path)
+    workflows.run_analyses(
+        files,
+        qc,
+        out_dir=str(out_dir),
+        n_iters=2,
+        n_jobs=1,
+        window=_WINDOW,
+        analyses=("qcrsfc",),
+        verbose=True,
+    )
+    assert (out_dir / "z_corrs.tsv.gz").is_file()
+    assert (out_dir / "mean_qcs.tsv.gz").is_file()
+
+
+@pytest.mark.integration
+def test_run_analyses_with_confounds(tmp_path, monkeypatch):
+    """Confounds are regressed out and the pipeline still completes."""
+    monkeypatch.setattr(
+        workflows.datasets, "fetch_coords_power_2011", lambda *a, **k: _fake_power_atlas()
+    )
+    out_dir = tmp_path / "out"
+    files, qc = _write_synthetic_images(tmp_path)
+    rng = np.random.RandomState(3)
+    confounds = [rng.normal(size=(IMG_SHAPE[-1], 2)) for _ in files]
+    workflows.run_analyses(
+        files,
+        qc,
+        out_dir=str(out_dir),
+        confounds=confounds,
+        n_iters=2,
+        n_jobs=1,
+        window=_WINDOW,
+        analyses=("qcrsfc", "highlow"),
+    )
+    assert (out_dir / "analysis_values.tsv.gz").is_file()
+
+
+@pytest.mark.integration
+def test_run_analyses_skips_bad_subjects(tmp_path, monkeypatch):
+    """A run with a zero-variance ROI is dropped, and the log records it."""
+    monkeypatch.setattr(
+        workflows.datasets, "fetch_coords_power_2011", lambda *a, **k: _fake_power_atlas()
+    )
+    out_dir = tmp_path / "out"
+    files, qc = _write_synthetic_images(tmp_path, n_subjects=12)
+
+    # Append a 13th subject whose image is constant -> every ROI has 0 variance.
+    bad_path = op.join(tmp_path, "sub-bad_bold.nii.gz")
+    nib.Nifti1Image(np.ones(IMG_SHAPE, dtype=np.float32), IMG_AFFINE).to_filename(bad_path)
+    files.append(bad_path)
+    qc.append(np.random.RandomState(9).uniform(0, 0.4, size=IMG_SHAPE[-1]))
+
+    workflows.run_analyses(
+        files, qc, out_dir=str(out_dir), n_iters=2, n_jobs=1, window=_WINDOW, analyses=("qcrsfc",)
+    )
+    assert (out_dir / "analysis_values.tsv.gz").is_file()
+    log_text = (out_dir / "log.tsv").read_text()
+    assert "variance of 0" in log_text
+
+
+@pytest.mark.integration
+def test_run_analyses_pca_outlier_detection(tmp_path, monkeypatch):
+    """The PCA/Mahalanobis outlier-detection branch runs and completes."""
+    monkeypatch.setattr(
+        workflows.datasets, "fetch_coords_power_2011", lambda *a, **k: _fake_power_atlas()
+    )
+    out_dir = tmp_path / "out"
+    files, qc = _write_synthetic_images(tmp_path, n_subjects=15)
+    workflows.run_analyses(
+        files,
+        qc,
+        out_dir=str(out_dir),
+        n_iters=2,
+        n_jobs=1,
+        window=_WINDOW,
+        analyses=("qcrsfc", "highlow", "scrubbing"),
+        pca_threshold=3,
+        outlier_threshold=0.05,
+    )
+    assert (out_dir / "analysis_values.tsv.gz").is_file()
+
+
+@pytest.mark.integration
+def test_run_analyses_too_few_subjects(tmp_path, monkeypatch):
+    """Fewer than 10 retained subjects raises a clear error."""
+    monkeypatch.setattr(
+        workflows.datasets, "fetch_coords_power_2011", lambda *a, **k: _fake_power_atlas()
+    )
+    out_dir = tmp_path / "out"
+    files, qc = _write_synthetic_images(tmp_path, n_subjects=5)
+    with pytest.raises(ValueError, match="Too few subjects"):
+        workflows.run_analyses(
+            files, qc, out_dir=str(out_dir), n_iters=2, n_jobs=1, window=_WINDOW
+        )

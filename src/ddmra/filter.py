@@ -1,4 +1,5 @@
 """Functions for the Earl filter."""
+
 import math
 
 import numpy as np

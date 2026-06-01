@@ -1,30 +1,128 @@
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
 
-[tool.black]
+[project]
+name = "ddmra"
+description = "A Python package for distance-dependent motion-related artifact (DDMRA) analysis."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "LGPL-2.1-or-later"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Taylor Salo", email = "tsalo006@fiu.edu" },
+    { name = "Julio A. Peraza" },
+]
+maintainers = [
+    { name = "Taylor Salo", email = "tsalo006@fiu.edu" },
+]
+keywords = ["neuroimaging", "fMRI"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "joblib",
+    "nibabel",
+    "nilearn",
+    "numpy>=1.15",
+    "scipy>=1.3.3",
+    "seaborn",
+    "tqdm",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+doc = [
+    "nbsphinx",
+    "sphinx>=1.5.3",
+    "sphinx_rtd_theme",
+]
+tests = [
+    "coverage",
+    "pytest",
+    "pytest-cov",
+]
+duecredit = ["duecredit"]
+dev = ["ruff"]
+all = ["ddmra[doc,tests,duecredit,dev]"]
+
+[project.urls]
+Homepage = "https://github.com/ME-ICA/ddmra"
+Documentation = "https://ddmra.readthedocs.io"
+"Bug Tracker" = "https://github.com/ME-ICA/ddmra/issues"
+
+# ---------------------------------------------------------------------------- #
+#                                   Hatch                                       #
+# ---------------------------------------------------------------------------- #
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/ddmra/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ddmra"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/ddmra", "test", "LICENSE", "README.md"]
+
+# ---------------------------------------------------------------------------- #
+#                                   Ruff                                        #
+# ---------------------------------------------------------------------------- #
+
+[tool.ruff]
 line-length = 99
-target-version = ['py37']
-include = '\.pyi?$'
-exclude = '''
-(
-  /(
-      \.eggs         # exclude a few common directories in the
-    | \.git          # root of the project
-    | \.github
-    | \.hg
-    | \.pytest_cache
-    | _build
-    | build
-    | dist
-  )/
-  | get_version.py
-  | versioneer.py
-  | ddmra/info.py
-  | ddmra/_version.py
-  | ddmra/due.py
-)
-'''
+target-version = "py39"
+extend-exclude = ["src/ddmra/_version.py", "src/ddmra/due.py", "docs"]
 
-[tool.isort]
-profile = "black"
-multi_line_output = 3
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E203",  # whitespace before ':' (conflicts with the formatter)
+    "E402",  # module-level import not at top of file
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ddmra"]
+
+# ---------------------------------------------------------------------------- #
+#                                  pytest                                       #
+# ---------------------------------------------------------------------------- #
+
+[tool.pytest.ini_options]
+log_cli = true
+testpaths = ["test"]
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+]
+
+# ---------------------------------------------------------------------------- #
+#                                 coverage                                      #
+# ---------------------------------------------------------------------------- #
+
+[tool.coverage.run]
+branch = false
+source = ["ddmra"]
+omit = [
+    "*/due.py",
+    "*/_version.py",
+]
+
+[tool.coverage.report]
+show_missing = true
