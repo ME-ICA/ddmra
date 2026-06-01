@@ -70,6 +70,38 @@ def test_run_analyses_qc_length_mismatch(tmp_path):
         workflows.run_analyses(["a", "b"], [np.zeros(5)], out_dir=str(tmp_path))
 
 
+def test_select_n_pca_components_float_threshold():
+    """Float thresholds retain the first component count that reaches the target."""
+    n_components, perc_varex = workflows._select_n_pca_components(
+        np.array([0.75, 0.95, 1.0]), 0.75
+    )
+    assert n_components == 1
+    assert perc_varex == 75.0
+
+    n_components, perc_varex = workflows._select_n_pca_components(
+        np.array([0.75, 0.95, 1.0]), 0.90
+    )
+    assert n_components == 2
+    assert perc_varex == 95.0
+
+
+def test_select_n_pca_components_int_threshold():
+    """Integer thresholds are already component counts, not zero-based indices."""
+    n_components, perc_varex = workflows._select_n_pca_components(
+        np.array([0.25, 0.60, 0.85, 1.0]), 3
+    )
+    assert n_components == 3
+    assert perc_varex == 85.0
+
+
+def test_select_n_pca_components_int_threshold_out_of_range():
+    """Integer component counts must select at least one available component."""
+    with pytest.raises(ValueError, match="between 1 and 3"):
+        workflows._select_n_pca_components(np.array([0.25, 0.60, 1.0]), 0)
+    with pytest.raises(ValueError, match="between 1 and 3"):
+        workflows._select_n_pca_components(np.array([0.25, 0.60, 1.0]), 4)
+
+
 # ---------------------------------------------------------------------------- #
 #                            End-to-end pipeline                               #
 # ---------------------------------------------------------------------------- #

@@ -14,6 +14,23 @@ from . import analysis, plotting, utils
 LGR = logging.getLogger("workflows")
 
 
+def _select_n_pca_components(varex_cumsum, pca_threshold):
+    """Select a one-based PCA component count from cumulative explained variance."""
+    if isinstance(pca_threshold, float):
+        n_components = np.where(varex_cumsum >= pca_threshold)[0][0] + 1
+    else:
+        n_components = pca_threshold
+
+    if not 1 <= n_components <= varex_cumsum.size:
+        raise ValueError(
+            "pca_threshold must select between 1 and "
+            f"{varex_cumsum.size} PCA components, not {n_components}."
+        )
+
+    perc_varex = varex_cumsum[n_components - 1] * 100
+    return n_components, perc_varex
+
+
 def run_analyses(
     files,
     qc,
@@ -232,13 +249,7 @@ def run_analyses(
         pca_components = pca.fit_transform(StandardScaler().fit_transform(z_corr_mats))
 
         varex_cumsum = np.cumsum(pca.explained_variance_ratio_)
-        if isinstance(pca_threshold, float):
-            # Identify number of components that explain 95% of variance
-            n_components = np.where(varex_cumsum >= pca_threshold)[0][0]
-        else:
-            n_components = pca_threshold
-
-        perc_varex = varex_cumsum[n_components] * 100
+        n_components, perc_varex = _select_n_pca_components(varex_cumsum, pca_threshold)
         LGR.info(f"{n_components} components selected ({perc_varex:.02f}% variance explained)")
 
         # Select the components
