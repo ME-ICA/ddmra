@@ -4,7 +4,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 from .analysis import highlow_analysis, qcrsfc_analysis, scrubbing_analysis
 from .plotting import plot_analysis, plot_results
-from .workflows import run_analyses
+from .workflows import run_analyses, run_pipeline_comparison
 
 try:
     __version__ = version("ddmra")
@@ -18,6 +18,7 @@ __all__ = [
     "qcrsfc_analysis",
     "scrubbing_analysis",
     "run_analyses",
+    "run_pipeline_comparison",
     "plot_analysis",
     "plot_results",
 ]

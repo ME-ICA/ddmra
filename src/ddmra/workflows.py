@@ -2,18 +2,33 @@
 
 import logging
 import os.path as op
+import re
+from itertools import combinations
 from os import PathLike, makedirs
 
 import numpy as np
 import pandas as pd
+from joblib import Parallel, delayed
 from nilearn import datasets
 from nilearn.maskers import NiftiLabelsMasker, NiftiSpheresMasker
 from nilearn.plotting import find_parcellation_cut_coords
 from scipy.spatial.distance import pdist, squareform
+from tqdm import tqdm
 
 from . import analysis, plotting, utils
 
 LGR = logging.getLogger("workflows")
+ALLOWED_ANALYSES = ("qcrsfc", "highlow", "scrubbing")
+COMPARISON_INTERCEPT_DISTANCE = 35
+COMPARISON_SLOPE_DISTANCE = 100
+
+
+def _reset_workflow_log_handler():
+    """Remove the previous workflow file handler, if one exists."""
+    for handler in list(LGR.handlers):
+        if getattr(handler, "_ddmra_workflow_handler", False):
+            LGR.removeHandler(handler)
+            handler.close()
 
 
 def _masker_kwargs():
@@ -26,6 +41,16 @@ def _masker_kwargs():
         "low_pass": None,
         "high_pass": None,
     }
+
+
+def _validate_analyses(analyses):
+    """Validate and return requested DDMRA analyses."""
+    assert len(analyses) > 0, "At least one analysis must be selected."
+    assert all([a in ALLOWED_ANALYSES for a in analyses]), (
+        "Parameter 'analyses' must be a tuple of one or more of the following values: "
+        f"{', '.join(ALLOWED_ANALYSES)}"
+    )
+    return tuple(analyses)
 
 
 def _sphere_fetcher_name(atlas):
@@ -244,6 +269,658 @@ def _select_n_pca_components(varex_cumsum, pca_threshold):
     return n_components, perc_varex
 
 
+def _safe_pipeline_name(pipeline):
+    """Convert a pipeline label to a safe directory name."""
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(pipeline).strip())
+    safe_name = safe_name.strip("._-")
+    if not safe_name:
+        raise ValueError(f"Pipeline name {pipeline!r} does not produce a valid directory name.")
+    return safe_name
+
+
+def _is_nifti_path(path):
+    """Return True when a path names a NIfTI image."""
+    path = str(path).lower()
+    cifti_suffixes = (
+        ".dconn.nii",
+        ".dlabel.nii",
+        ".dscalar.nii",
+        ".dtseries.nii",
+        ".pconn.nii",
+        ".pdconn.nii",
+        ".plabel.nii",
+        ".pscalar.nii",
+        ".ptseries.nii",
+        ".sdseries.nii",
+    )
+    return not path.endswith(cifti_suffixes) and path.endswith((".nii", ".nii.gz"))
+
+
+def _load_pipeline_file_table(pipeline_file_table):
+    """Load a run-by-pipeline file table from a DataFrame or TSV path."""
+    if isinstance(pipeline_file_table, pd.DataFrame):
+        table = pipeline_file_table.copy()
+        base_dir = op.abspath(".")
+    else:
+        table_path = op.abspath(pipeline_file_table)
+        table = pd.read_table(table_path)
+        base_dir = op.dirname(table_path)
+
+    if table.empty:
+        raise ValueError("pipeline_file_table must contain at least one run and one pipeline.")
+
+    return table.reset_index(drop=True), base_dir
+
+
+def _prepare_pipeline_file_table(pipeline_file_table, pipeline_columns=None):
+    """Validate and resolve paths in a run-by-pipeline file table."""
+    table, base_dir = _load_pipeline_file_table(pipeline_file_table)
+
+    if pipeline_columns is None:
+        pipeline_columns = list(table.columns)
+    else:
+        pipeline_columns = list(pipeline_columns)
+
+    if not pipeline_columns:
+        raise ValueError("At least one pipeline column must be selected.")
+
+    missing_columns = [column for column in pipeline_columns if column not in table.columns]
+    if missing_columns:
+        raise ValueError(f"Pipeline columns not found: {', '.join(missing_columns)}.")
+
+    safe_names = [_safe_pipeline_name(column) for column in pipeline_columns]
+    if len(set(safe_names)) != len(safe_names):
+        raise ValueError("Pipeline column names must produce unique output directory names.")
+
+    file_table = pd.DataFrame(index=table.index)
+    for column in pipeline_columns:
+        if table[column].isna().any():
+            raise ValueError(f"Pipeline column '{column}' contains missing file paths.")
+
+        paths = []
+        for value in table[column].astype(str):
+            path = value if op.isabs(value) else op.join(base_dir, value)
+            path = op.abspath(path)
+            if not op.isfile(path):
+                raise FileNotFoundError(f"File not found for pipeline '{column}': {path}")
+            if not _is_nifti_path(path):
+                raise ValueError(
+                    f"Pipeline column '{column}' contains a non-NIfTI file path: {path}"
+                )
+            paths.append(path)
+        file_table[column] = paths
+
+    return file_table, dict(zip(pipeline_columns, safe_names))
+
+
+def _extract_pipeline_data(files, qc, analyses, atlas, sphere_radius, window, confounds=None):
+    """Extract analysis-ready run-level data for direct pipeline comparisons."""
+    n_subjects = len(files)
+    if confounds is not None and len(confounds) != n_subjects:
+        raise ValueError(
+            f"confounds has {len(confounds)} rows, but {n_subjects} runs were provided."
+        )
+
+    atlas_masker, coords = _build_atlas_masker(atlas=atlas, sphere_radius=sphere_radius)
+    n_rois = coords.shape[0]
+    triu_idx = np.triu_indices(n_rois, k=1)
+    distances = squareform(pdist(coords))[triu_idx]
+    distances = np.round(distances, decimals=3)
+    edge_sorting_idx = distances.argsort()
+    distances = distances[edge_sorting_idx]
+    n_edges = distances.size
+
+    needs_z_corrs = ("qcrsfc" in analyses) or ("highlow" in analyses)
+    z_corr_mats = np.full((n_subjects, n_edges), np.nan) if needs_z_corrs else None
+    ts_all = [None] * n_subjects if "scrubbing" in analyses else None
+    valid = np.zeros(n_subjects, dtype=bool)
+
+    for i_subj, file_ in enumerate(files):
+        if confounds is None:
+            raw_ts = atlas_masker.fit_transform(file_).T
+        else:
+            raw_ts = atlas_masker.fit_transform(file_, confounds=confounds[i_subj]).T
+
+        if raw_ts.shape[0] != n_rois:
+            raise ValueError(
+                f"{file_} produced {raw_ts.shape[0]} ROIs, but {n_rois} are expected."
+            )
+        if np.any(np.isnan(raw_ts)):
+            continue
+        if np.any(np.isclose(np.var(raw_ts, axis=1), 0)):
+            continue
+
+        if needs_z_corrs:
+            raw_corrs = np.corrcoef(raw_ts)[triu_idx]
+            raw_corrs = raw_corrs[edge_sorting_idx]
+            z_corr_mats[i_subj, :] = utils.r2z(raw_corrs)
+        if ts_all is not None:
+            ts_all[i_subj] = raw_ts
+        valid[i_subj] = True
+
+    ma_distances = utils.moving_average(distances, window)
+    _, smoothing_curve_distances = utils.average_across_distances(ma_distances, distances)
+
+    return {
+        "valid": valid,
+        "z_corr_mats": z_corr_mats,
+        "ts_all": ts_all,
+        "distances": distances,
+        "edge_sorting_idx": edge_sorting_idx,
+        "smoothing_curve_distances": smoothing_curve_distances,
+    }
+
+
+def _subset_pipeline_data(pipeline_data, idx):
+    """Subset extracted pipeline data to paired runs."""
+    return {
+        "z_corr_mats": (
+            None if pipeline_data["z_corr_mats"] is None else pipeline_data["z_corr_mats"][idx, :]
+        ),
+        "ts_all": (
+            None
+            if pipeline_data["ts_all"] is None
+            else [pipeline_data["ts_all"][i] for i in np.where(idx)[0]]
+        ),
+    }
+
+
+def _compute_pipeline_analysis_values(
+    analysis_name,
+    mean_qc,
+    qc,
+    pipeline_data,
+    edge_sorting_idx,
+    qc_thresh,
+    run_covariates=None,
+):
+    """Compute one DDMRA analysis for one pipeline on an already-paired run set."""
+    if analysis_name == "qcrsfc":
+        return analysis.qcrsfc_analysis(
+            mean_qc,
+            pipeline_data["z_corr_mats"],
+            run_covariates=run_covariates,
+        )
+    if analysis_name == "highlow":
+        return analysis.highlow_analysis(mean_qc, pipeline_data["z_corr_mats"])
+    if analysis_name == "scrubbing":
+        return analysis.scrubbing_analysis(
+            qc,
+            pipeline_data["ts_all"],
+            edge_sorting_idx,
+            qc_thresh,
+            perm=False,
+        )
+    raise ValueError(f"Unknown analysis '{analysis_name}'.")
+
+
+def _compute_pipeline_analysis_curves(
+    analyses,
+    mean_qc,
+    qc,
+    pipeline_data,
+    edge_sorting_idx,
+    qc_thresh,
+    window,
+    distances,
+    smoothing_curve_distances,
+    run_covariates=None,
+):
+    """Compute smoothing curves for all requested analyses for one pipeline."""
+    curves = {}
+    for analysis_name in analyses:
+        values = _compute_pipeline_analysis_values(
+            analysis_name,
+            mean_qc,
+            qc,
+            pipeline_data,
+            edge_sorting_idx,
+            qc_thresh,
+            run_covariates=run_covariates,
+        )
+        curves[analysis_name] = utils.calculate_smoothing_curve(
+            values,
+            window,
+            distances,
+            smoothing_curve_distances,
+        )
+    return curves
+
+
+def _curve_intercept_and_slope(curve, distances):
+    """Return DDMRA intercept and local-to-long distance slope for a smoothing curve."""
+    intercept = utils.get_val(distances, curve, COMPARISON_INTERCEPT_DISTANCE)
+    slope = intercept - utils.get_val(distances, curve, COMPARISON_SLOPE_DISTANCE)
+    return intercept, slope
+
+
+def _swap_paired_pipeline_data(first_data, second_data, swap_idx):
+    """Swap paired run-level pipeline labels according to a boolean index."""
+    swapped_first = {}
+    swapped_second = {}
+
+    if first_data["z_corr_mats"] is None:
+        swapped_first["z_corr_mats"] = None
+        swapped_second["z_corr_mats"] = None
+    else:
+        first_z = first_data["z_corr_mats"].copy()
+        second_z = second_data["z_corr_mats"].copy()
+        first_z[swap_idx, :], second_z[swap_idx, :] = (
+            second_z[swap_idx, :].copy(),
+            first_z[swap_idx, :].copy(),
+        )
+        swapped_first["z_corr_mats"] = first_z
+        swapped_second["z_corr_mats"] = second_z
+
+    if first_data["ts_all"] is None:
+        swapped_first["ts_all"] = None
+        swapped_second["ts_all"] = None
+    else:
+        first_ts = list(first_data["ts_all"])
+        second_ts = list(second_data["ts_all"])
+        for i_run, do_swap in enumerate(swap_idx):
+            if do_swap:
+                first_ts[i_run], second_ts[i_run] = second_ts[i_run], first_ts[i_run]
+        swapped_first["ts_all"] = first_ts
+        swapped_second["ts_all"] = second_ts
+
+    return swapped_first, swapped_second
+
+
+def _pipeline_pairwise_null_iter(
+    seed,
+    analyses,
+    mean_qc,
+    qc,
+    first_data,
+    second_data,
+    edge_sorting_idx,
+    qc_thresh,
+    window,
+    distances,
+    smoothing_curve_distances,
+    run_covariates=None,
+):
+    """One paired within-run pipeline-label swap permutation."""
+    rng = np.random.RandomState(seed=seed)
+    swap_idx = rng.random(mean_qc.shape[0]) < 0.5
+    swapped_first, swapped_second = _swap_paired_pipeline_data(first_data, second_data, swap_idx)
+
+    first_curves = _compute_pipeline_analysis_curves(
+        analyses,
+        mean_qc,
+        qc,
+        swapped_first,
+        edge_sorting_idx,
+        qc_thresh,
+        window,
+        distances,
+        smoothing_curve_distances,
+        run_covariates=run_covariates,
+    )
+    second_curves = _compute_pipeline_analysis_curves(
+        analyses,
+        mean_qc,
+        qc,
+        swapped_second,
+        edge_sorting_idx,
+        qc_thresh,
+        window,
+        distances,
+        smoothing_curve_distances,
+        run_covariates=run_covariates,
+    )
+
+    null_values = np.zeros((len(analyses), 2))
+    for i_analysis, analysis_name in enumerate(analyses):
+        first_intercept, first_slope = _curve_intercept_and_slope(
+            first_curves[analysis_name],
+            smoothing_curve_distances,
+        )
+        second_intercept, second_slope = _curve_intercept_and_slope(
+            second_curves[analysis_name],
+            smoothing_curve_distances,
+        )
+        null_values[i_analysis, 0] = first_intercept - second_intercept
+        null_values[i_analysis, 1] = first_slope - second_slope
+
+    return null_values
+
+
+def _read_pipeline_retention(pipeline_outputs, pipeline, n_runs):
+    """Read the retained run mask from a pipeline workflow output directory."""
+    summary_path = op.join(pipeline_outputs[pipeline], "run_denoising_summary.tsv")
+    summary = pd.read_table(summary_path)
+    if summary.shape[0] != n_runs:
+        raise ValueError(
+            f"{summary_path} has {summary.shape[0]} rows, but {n_runs} runs were provided."
+        )
+    return summary["retained_for_analysis"].astype(bool).to_numpy()
+
+
+def _run_pipeline_pairwise_comparisons(
+    file_table,
+    qc,
+    out_dir,
+    pipeline_outputs,
+    safe_names,
+    analyses,
+    confounds,
+    n_iters,
+    n_jobs,
+    qc_thresh,
+    window,
+    atlas,
+    sphere_radius,
+    run_covariates,
+):
+    """Perform direct paired statistical comparisons between processing pipelines."""
+    n_runs = file_table.shape[0]
+    if n_iters < 1:
+        raise ValueError("comparison_n_iters must be at least 1.")
+
+    qc = _validate_qc_inputs(qc)
+    mean_qc = np.array([np.mean(subj_qc) for subj_qc in qc])
+    if "qcrsfc" in analyses:
+        run_covariates = _prepare_run_covariates(run_covariates, n_runs)
+    else:
+        run_covariates = None
+
+    pipeline_data = {}
+    retained = {}
+    for pipeline in file_table.columns:
+        pipeline_data[pipeline] = _extract_pipeline_data(
+            file_table[pipeline].tolist(),
+            qc,
+            analyses,
+            atlas,
+            sphere_radius,
+            window,
+            confounds=confounds,
+        )
+        retained[pipeline] = _read_pipeline_retention(pipeline_outputs, pipeline, n_runs)
+
+    distances = next(iter(pipeline_data.values()))["distances"]
+    smoothing_curve_distances = next(iter(pipeline_data.values()))["smoothing_curve_distances"]
+    edge_sorting_idx = next(iter(pipeline_data.values()))["edge_sorting_idx"]
+    curve_rows = []
+    comparison_rows = []
+    null_arrays = {}
+
+    for first_pipeline, second_pipeline in combinations(file_table.columns, 2):
+        common_idx = (
+            retained[first_pipeline]
+            & retained[second_pipeline]
+            & pipeline_data[first_pipeline]["valid"]
+            & pipeline_data[second_pipeline]["valid"]
+        )
+        n_common = int(np.sum(common_idx))
+        if n_common < 10:
+            raise ValueError(
+                f"Too few paired runs remaining for {first_pipeline} vs {second_pipeline}: "
+                f"{n_common}."
+            )
+
+        pair_mean_qc = mean_qc[common_idx]
+        pair_qc = [qc[i] for i in np.where(common_idx)[0]]
+        pair_run_covariates = None if run_covariates is None else run_covariates[common_idx, :]
+        first_data = _subset_pipeline_data(pipeline_data[first_pipeline], common_idx)
+        second_data = _subset_pipeline_data(pipeline_data[second_pipeline], common_idx)
+
+        first_curves = _compute_pipeline_analysis_curves(
+            analyses,
+            pair_mean_qc,
+            pair_qc,
+            first_data,
+            edge_sorting_idx,
+            qc_thresh,
+            window,
+            distances,
+            smoothing_curve_distances,
+            run_covariates=pair_run_covariates,
+        )
+        second_curves = _compute_pipeline_analysis_curves(
+            analyses,
+            pair_mean_qc,
+            pair_qc,
+            second_data,
+            edge_sorting_idx,
+            qc_thresh,
+            window,
+            distances,
+            smoothing_curve_distances,
+            run_covariates=pair_run_covariates,
+        )
+
+        with utils.tqdm_joblib(
+            tqdm(
+                desc=f"{first_pipeline} vs {second_pipeline} paired swaps",
+                total=n_iters,
+            )
+        ):
+            null_values = Parallel(n_jobs=n_jobs)(
+                delayed(_pipeline_pairwise_null_iter)(
+                    seed,
+                    analyses,
+                    pair_mean_qc,
+                    pair_qc,
+                    first_data,
+                    second_data,
+                    edge_sorting_idx,
+                    qc_thresh,
+                    window,
+                    distances,
+                    smoothing_curve_distances,
+                    run_covariates=pair_run_covariates,
+                )
+                for seed in range(n_iters)
+            )
+        null_values = np.stack(null_values, axis=0)
+
+        pair_key = f"{safe_names[first_pipeline]}__vs__{safe_names[second_pipeline]}"
+        for i_analysis, analysis_name in enumerate(analyses):
+            first_curve = first_curves[analysis_name]
+            second_curve = second_curves[analysis_name]
+            for distance, first_value, second_value in zip(
+                smoothing_curve_distances,
+                first_curve,
+                second_curve,
+            ):
+                curve_rows.append(
+                    {
+                        "pipeline_1": first_pipeline,
+                        "pipeline_2": second_pipeline,
+                        "analysis": analysis_name,
+                        "distance": distance,
+                        "pipeline_1_value": first_value,
+                        "pipeline_2_value": second_value,
+                        "difference": first_value - second_value,
+                    }
+                )
+
+            first_intercept, first_slope = _curve_intercept_and_slope(
+                first_curve,
+                smoothing_curve_distances,
+            )
+            second_intercept, second_slope = _curve_intercept_and_slope(
+                second_curve,
+                smoothing_curve_distances,
+            )
+            observed = {
+                "intercept_35mm": (
+                    first_intercept,
+                    second_intercept,
+                    first_intercept - second_intercept,
+                    null_values[:, i_analysis, 0],
+                ),
+                "slope_35_to_100mm": (
+                    first_slope,
+                    second_slope,
+                    first_slope - second_slope,
+                    null_values[:, i_analysis, 1],
+                ),
+            }
+
+            for contrast, (first_value, second_value, diff_value, null_array) in observed.items():
+                p_value = utils.null_to_p(
+                    diff_value,
+                    null_array,
+                    tail="two",
+                    symmetric=True,
+                )
+                comparison_rows.append(
+                    {
+                        "pipeline_1": first_pipeline,
+                        "pipeline_2": second_pipeline,
+                        "analysis": analysis_name,
+                        "contrast": contrast,
+                        "pipeline_1_value": first_value,
+                        "pipeline_2_value": second_value,
+                        "difference": diff_value,
+                        "p_value": p_value,
+                        "tail": "two-sided",
+                        "null_method": "paired run-wise pipeline-label swaps",
+                        "n_permutations": n_iters,
+                        "n_paired_runs": n_common,
+                    }
+                )
+                null_arrays[f"{pair_key}__{analysis_name}__{contrast}"] = null_array
+
+    pd.DataFrame(comparison_rows).to_csv(
+        op.join(out_dir, "pipeline_pairwise_comparisons.tsv"),
+        sep="\t",
+        lineterminator="\n",
+        index=False,
+    )
+    pd.DataFrame(curve_rows).to_csv(
+        op.join(out_dir, "pipeline_pairwise_smoothing_curves.tsv.gz"),
+        sep="\t",
+        lineterminator="\n",
+        index=False,
+    )
+    np.savez_compressed(op.join(out_dir, "pipeline_pairwise_nulls.npz"), **null_arrays)
+
+
+def run_pipeline_comparison(
+    pipeline_file_table,
+    qc,
+    out_dir=".",
+    pipeline_columns=None,
+    compare_pipelines=True,
+    comparison_n_iters=None,
+    comparison_n_jobs=None,
+    **run_analyses_kwargs,
+):
+    """Run DDMRA analyses for multiple processing pipelines.
+
+    Parameters
+    ----------
+    pipeline_file_table : path-like or pandas.DataFrame
+        TSV file or DataFrame with one row per run and one column per processing pipeline.
+        Each selected cell must contain a path to a NIfTI image file for that run and pipeline.
+        Relative paths in TSV files are resolved relative to the TSV's directory.
+    qc : (N,) list of array_like
+        List of 1D QC metric arrays, one per run. The same QC values are used for every
+        pipeline so the processing pipelines are compared over the same motion/quality axis.
+    out_dir : str, optional
+        Output directory. Each pipeline is written to a subdirectory of this directory.
+        Default is current directory.
+    pipeline_columns : None or list of str, optional
+        Pipeline columns to run. If None, all columns in ``pipeline_file_table`` are used.
+    compare_pipelines : bool, optional
+        If True and at least two pipelines are selected, perform direct paired
+        between-pipeline comparisons using run-wise pipeline-label swaps.
+        Default is True.
+    comparison_n_iters : None or int, optional
+        Number of paired label-swap permutations for direct pipeline comparisons. If None,
+        use the same ``n_iters`` value passed to :func:`run_analyses`.
+    comparison_n_jobs : None or int, optional
+        Number of jobs for direct pipeline comparisons. If None, use the same ``n_jobs`` value
+        passed to :func:`run_analyses`.
+    **run_analyses_kwargs
+        Additional keyword arguments passed through to :func:`run_analyses`.
+
+    Returns
+    -------
+    pipeline_outputs : dict
+        Mapping from input pipeline column names to output directories.
+
+    Notes
+    -----
+    This workflow writes each pipeline's DDMRA outputs to a pipeline-specific subdirectory.
+    When ``compare_pipelines`` is True, it also writes direct pairwise comparisons of each
+    requested analysis' smoothing-curve intercept and slope. These comparisons use paired
+    run-wise pipeline-label swaps, which preserve the run-level QC values and matched
+    processing-pipeline structure. Pairwise comparisons are conditional on the intersection
+    of runs retained for both pipelines being compared.
+
+    Direct comparison outputs are written to:
+    - ``pipeline_pairwise_comparisons.tsv``: intercept/slope differences and p-values.
+    - ``pipeline_pairwise_smoothing_curves.tsv.gz``: observed paired difference curves.
+    - ``pipeline_pairwise_nulls.npz``: paired label-swap null distributions.
+    """
+    file_table, safe_names = _prepare_pipeline_file_table(pipeline_file_table, pipeline_columns)
+    if len(qc) != file_table.shape[0]:
+        raise ValueError(
+            f"qc has {len(qc)} runs, but the pipeline file table has {file_table.shape[0]}."
+        )
+    analyses = _validate_analyses(
+        run_analyses_kwargs.get("analyses", ("qcrsfc", "highlow", "scrubbing"))
+    )
+
+    makedirs(out_dir, exist_ok=True)
+    pipeline_outputs = {}
+    summary_rows = []
+
+    for pipeline, pipeline_safe_name in safe_names.items():
+        pipeline_out_dir = op.join(out_dir, pipeline_safe_name)
+        run_analyses(
+            file_table[pipeline].tolist(),
+            qc,
+            out_dir=pipeline_out_dir,
+            **run_analyses_kwargs,
+        )
+        pipeline_outputs[pipeline] = pipeline_out_dir
+        summary_rows.append(
+            {
+                "pipeline": pipeline,
+                "output_dir": pipeline_out_dir,
+                "n_runs": file_table.shape[0],
+            }
+        )
+
+    pd.DataFrame(summary_rows).to_csv(
+        op.join(out_dir, "pipeline_comparison_summary.tsv"),
+        sep="\t",
+        lineterminator="\n",
+        index=False,
+    )
+
+    if compare_pipelines and len(file_table.columns) > 1:
+        if comparison_n_iters is None:
+            comparison_n_iters = run_analyses_kwargs.get("n_iters", 10000)
+        if comparison_n_jobs is None:
+            comparison_n_jobs = run_analyses_kwargs.get("n_jobs", 1)
+        _run_pipeline_pairwise_comparisons(
+            file_table,
+            qc,
+            out_dir,
+            pipeline_outputs,
+            safe_names,
+            analyses,
+            run_analyses_kwargs.get("confounds", None),
+            comparison_n_iters,
+            comparison_n_jobs,
+            run_analyses_kwargs.get("qc_thresh", 0.2),
+            run_analyses_kwargs.get("window", 1000),
+            run_analyses_kwargs.get("atlas", "power_2011"),
+            run_analyses_kwargs.get("sphere_radius", 5.0),
+            run_analyses_kwargs.get("run_covariates", None),
+        )
+
+    return pipeline_outputs
+
+
 def run_analyses(
     files,
     qc,
@@ -345,12 +1022,7 @@ def run_analyses(
     - ``mean_qcs.tsv.gz``: Mean QC values for the good files, used by QC:RSFC and high-low
         analyses.
     """
-    ALLOWED_ANALYSES = ("qcrsfc", "highlow", "scrubbing")
-    assert len(analyses) > 0, "At least one analysis must be selected."
-    assert all([a in ALLOWED_ANALYSES for a in analyses]), (
-        "Parameter 'analyses' must be a tuple of one or more of the following values: "
-        f"{', '.join(ALLOWED_ANALYSES)}"
-    )
+    analyses = _validate_analyses(analyses)
 
     if (pca_threshold is None) and (outlier_threshold is None):
         LGR.info("Not performing outlier detection.")
@@ -371,9 +1043,11 @@ def run_analyses(
 
     # create LGR with 'spam_application'
     LGR.setLevel(logging.DEBUG)
+    _reset_workflow_log_handler()
     # create file handler which logs even debug messages
     fh = logging.FileHandler(op.join(out_dir, "log.tsv"))
     fh.setLevel(logging.DEBUG)
+    fh._ddmra_workflow_handler = True
     # create formatter and add it to the handlers
     formatter = logging.Formatter("%(asctime)s\t%(name)-12s\t%(levelname)-8s\t%(message)s")
     fh.setFormatter(formatter)

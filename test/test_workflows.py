@@ -248,6 +248,65 @@ def test_build_run_denoising_summary_includes_inferred_and_user_metrics():
     assert summary["temporal_degrees_of_freedom"].tolist() == [1, 2]
 
 
+def test_prepare_pipeline_file_table_resolves_relative_paths(tmp_path):
+    """Pipeline TSV paths are resolved relative to the TSV file."""
+    image_path = tmp_path / "sub-01_bold.nii.gz"
+    image_path.write_text("placeholder")
+    table_path = tmp_path / "pipelines.tsv"
+    pd.DataFrame({"preprocessed": ["sub-01_bold.nii.gz"]}).to_csv(
+        table_path, sep="\t", index=False
+    )
+
+    table, safe_names = workflows._prepare_pipeline_file_table(table_path)
+
+    assert table["preprocessed"].tolist() == [str(image_path)]
+    assert safe_names == {"preprocessed": "preprocessed"}
+
+
+def test_prepare_pipeline_file_table_rejects_missing_file(tmp_path):
+    """Missing image paths in a pipeline table raise a clear error."""
+    table_path = tmp_path / "pipelines.tsv"
+    pd.DataFrame({"preprocessed": ["missing.nii.gz"]}).to_csv(table_path, sep="\t", index=False)
+
+    with pytest.raises(FileNotFoundError, match="missing.nii.gz"):
+        workflows._prepare_pipeline_file_table(table_path)
+
+
+def test_prepare_pipeline_file_table_rejects_non_nifti_file(tmp_path):
+    """Pipeline comparison currently supports only NIfTI files."""
+    cifti_path = tmp_path / "sub-01_bold.dtseries.nii"
+    cifti_path.write_text("placeholder")
+    table_path = tmp_path / "pipelines.tsv"
+    pd.DataFrame({"preprocessed": ["sub-01_bold.dtseries.nii"]}).to_csv(
+        table_path, sep="\t", index=False
+    )
+
+    with pytest.raises(ValueError, match="non-NIfTI"):
+        workflows._prepare_pipeline_file_table(table_path)
+
+
+def test_prepare_pipeline_file_table_selects_columns(tmp_path):
+    """Users can select a subset of pipeline columns for comparison."""
+    first_path = tmp_path / "first.nii.gz"
+    second_path = tmp_path / "second.nii.gz"
+    first_path.write_text("placeholder")
+    second_path.write_text("placeholder")
+    table = pd.DataFrame(
+        {
+            "preprocessed": [str(first_path)],
+            "tedana": [str(second_path)],
+        }
+    )
+
+    selected, safe_names = workflows._prepare_pipeline_file_table(
+        table, pipeline_columns=["tedana"]
+    )
+
+    assert list(selected.columns) == ["tedana"]
+    assert selected["tedana"].tolist() == [str(second_path)]
+    assert safe_names == {"tedana": "tedana"}
+
+
 @pytest.mark.integration
 def test_run_analyses_end_to_end(tmp_path, monkeypatch):
     """Run the full workflow and confirm all expected output files are written."""
@@ -310,6 +369,56 @@ def test_run_analyses_with_labels_atlas_file(tmp_path):
 
     assert (out_dir / "analysis_values.tsv.gz").is_file()
     assert (out_dir / "analysis_results.png").is_file()
+
+
+@pytest.mark.integration
+def test_run_pipeline_comparison_end_to_end(tmp_path, monkeypatch):
+    """A run-by-pipeline TSV launches one workflow per processing pipeline."""
+    monkeypatch.setattr(
+        workflows.datasets, "fetch_coords_power_2011", lambda *a, **k: _fake_power_atlas()
+    )
+    files, qc = _write_synthetic_images(tmp_path)
+    table_path = tmp_path / "pipelines.tsv"
+    pd.DataFrame(
+        {
+            "preprocessed": [op.relpath(file_, tmp_path) for file_ in files],
+            "XCP-D": [op.relpath(file_, tmp_path) for file_ in files],
+        }
+    ).to_csv(table_path, sep="\t", index=False)
+    out_dir = tmp_path / "comparison"
+
+    outputs = workflows.run_pipeline_comparison(
+        table_path,
+        qc,
+        out_dir=str(out_dir),
+        n_iters=2,
+        n_jobs=1,
+        window=_WINDOW,
+        analyses=("qcrsfc", "highlow", "scrubbing"),
+    )
+
+    assert set(outputs) == {"preprocessed", "XCP-D"}
+    assert (out_dir / "preprocessed" / "analysis_values.tsv.gz").is_file()
+    assert (out_dir / "XCP-D" / "analysis_values.tsv.gz").is_file()
+    summary = pd.read_table(out_dir / "pipeline_comparison_summary.tsv")
+    assert summary["pipeline"].tolist() == ["preprocessed", "XCP-D"]
+    pairwise = pd.read_table(out_dir / "pipeline_pairwise_comparisons.tsv")
+    assert pairwise["pipeline_1"].unique().tolist() == ["preprocessed"]
+    assert pairwise["pipeline_2"].unique().tolist() == ["XCP-D"]
+    assert set(pairwise["analysis"]) == {"qcrsfc", "highlow", "scrubbing"}
+    assert set(pairwise["contrast"]) == {"intercept_35mm", "slope_35_to_100mm"}
+    assert np.allclose(pairwise["difference"], 0)
+    assert np.allclose(pairwise["p_value"], 1)
+    assert (out_dir / "pipeline_pairwise_smoothing_curves.tsv.gz").is_file()
+    nulls = np.load(out_dir / "pipeline_pairwise_nulls.npz")
+    assert set(nulls.files) == {
+        "preprocessed__vs__XCP-D__qcrsfc__intercept_35mm",
+        "preprocessed__vs__XCP-D__qcrsfc__slope_35_to_100mm",
+        "preprocessed__vs__XCP-D__highlow__intercept_35mm",
+        "preprocessed__vs__XCP-D__highlow__slope_35_to_100mm",
+        "preprocessed__vs__XCP-D__scrubbing__intercept_35mm",
+        "preprocessed__vs__XCP-D__scrubbing__slope_35_to_100mm",
+    }
 
 
 @pytest.mark.integration
