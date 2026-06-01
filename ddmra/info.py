@@ -55,6 +55,7 @@ REQUIRES = [
     "numpy>=1.15",
     "scipy>=1.3.3",
     "seaborn",
+    "tqdm",
 ]
 
 TESTS_REQUIRES = [

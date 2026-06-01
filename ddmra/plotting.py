@@ -25,7 +25,7 @@ def plot_analysis(
     null_smoothing_curves,
     n_lines=50,
     metric_name=None,
-    ylim=(-0.5, 0.5),
+    ylim=1,
     fig=None,
     ax=None,
 ):
@@ -96,13 +96,19 @@ def plot_analysis(
     ax.plot(curve_distances, smoothing_curve, color="white")
 
     ax.set_ylabel(metric_name, fontsize=32, labelpad=-30)
-    ax.set_yticks(ylim)
-    ax.set_yticklabels(ylim, fontsize=32)
-    ax.set_ylim(ylim)
+    # Round to nearest decimal point at level you want.
+    ylims = (
+        np.floor(np.min(data_points) * (10**ylim)) / (10**ylim),
+        np.ceil(np.max(data_points) * (10**ylim)) / (10**ylim),
+    )
+    ax.set_yticks(ylims)
+    ax.set_yticklabels(ylims, fontsize=32)
+    ax.set_ylim(ylims)
 
     ax.set_xlabel("Distance (mm)", fontsize=32)
     ax.set_xticks([0, 50, 100, 150])
     ax.set_xticklabels([])
+    # Round to nearest 10.
     ax.set_xlim(0, np.ceil(np.max(distances) / 10) * 10)
 
     ax.annotate(
@@ -137,17 +143,22 @@ def plot_results(in_dir):
         "scrubbing": "Scrubbing\n" + r"${\Delta}z_{r}$",
     }
     YLIMS = {
-        "qcrsfc": (-1.0, 1.0),
-        "highlow": (-1.0, 1.0),
-        "scrubbing": (-0.05, 0.05),
+        "qcrsfc": 1,
+        "highlow": 1,
+        "scrubbing": 2,
     }
     analysis_values = pd.read_table(op.join(in_dir, "analysis_values.tsv.gz"))
     smoothing_curves = pd.read_table(op.join(in_dir, "smoothing_curves.tsv.gz"))
     null_curves = np.load(op.join(in_dir, "null_smoothing_curves.npz"))
 
-    fig, axes = plt.subplots(figsize=(8, 24), nrows=len(METRIC_LABELS))
+    # Number of analyses is
+    found_analyses = [lab for lab in METRIC_LABELS.keys() if lab in analysis_values.columns]
+    n_analyses = len(found_analyses)
 
-    for i_analysis, (analysis_type, label) in enumerate(METRIC_LABELS.items()):
+    fig, axes = plt.subplots(figsize=(8, 8 * n_analyses), nrows=n_analyses)
+
+    for i_analysis, analysis_type in enumerate(found_analyses):
+        label = METRIC_LABELS[analysis_type]
         values = analysis_values[analysis_type].values
         smoothing_curve = smoothing_curves[analysis_type].values
 
