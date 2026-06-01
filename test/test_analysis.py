@@ -33,6 +33,14 @@ def test_highlow_analysis_shape_assertions():
         analysis.highlow_analysis(np.ones(2), np.ones((3, 4)))
 
 
+def test_highlow_analysis_rejects_nonfinite_or_constant_qc():
+    """High-low analysis raises on inputs that would silently produce NaNs."""
+    with pytest.raises(ValueError, match="finite"):
+        analysis.highlow_analysis(np.array([1.0, np.nan, 3.0]), np.ones((3, 2)))
+    with pytest.raises(ValueError, match="nonzero variance"):
+        analysis.highlow_analysis(np.ones(3), np.arange(6.0).reshape(3, 2))
+
+
 def test_qcrsfc_analysis_signs_and_values():
     """QC:RSFC correlates each edge with QC across subjects, then z-transforms."""
     mean_qcs = np.array([1.0, 2.0, 3.0, 4.0])
@@ -54,12 +62,69 @@ def test_qcrsfc_analysis_signs_and_values():
     assert 0 < result[2] < np.arctanh(0.999)
 
 
+def test_qcrsfc_analysis_adjusts_for_run_covariates():
+    """QC:RSFC can partial out run-level covariates before edgewise correlations."""
+    covariate = np.repeat([0.0, 1.0], 4)
+    qc_residual = np.tile([-1.0, -0.5, 0.5, 1.0], 2)
+    mean_qcs = 10 * covariate + qc_residual
+    z_corr_mats = np.column_stack(
+        [
+            5 * covariate + np.array([1, -1, 1, -1, -1, 1, -1, 1]),
+            5 * covariate + qc_residual,
+        ]
+    )
+
+    result = analysis.qcrsfc_analysis(mean_qcs, z_corr_mats, run_covariates=covariate[:, None])
+
+    assert np.isclose(result[0], 0)
+    assert np.isclose(result[1], np.arctanh(0.999))
+
+
 def test_qcrsfc_analysis_shape_assertions():
     """qcrsfc_analysis enforces 1D QC, 2D corr matrices, and matching subjects."""
     with pytest.raises(AssertionError):
         analysis.qcrsfc_analysis(np.ones((2, 2)), np.ones((2, 3)))
     with pytest.raises(AssertionError):
         analysis.qcrsfc_analysis(np.ones(2), np.ones(3))
+    with pytest.raises(ValueError, match="rows"):
+        analysis.qcrsfc_analysis(
+            np.arange(2.0),
+            np.array([[1.0, 2.0, 3.0], [2.0, 3.0, 4.0]]),
+            run_covariates=np.ones((3, 1)),
+        )
+
+
+def test_qcrsfc_analysis_rejects_nonfinite_inputs():
+    """QC:RSFC raises on NaNs instead of producing silent NaN outputs."""
+    with pytest.raises(ValueError, match="mean_qcs"):
+        analysis.qcrsfc_analysis(np.array([1.0, np.nan, 3.0]), np.ones((3, 2)))
+    with pytest.raises(ValueError, match="z_corr_mats"):
+        analysis.qcrsfc_analysis(
+            np.arange(3.0),
+            np.array([[1.0, 2.0], [np.nan, 3.0], [4.0, 5.0]]),
+        )
+
+
+def test_qcrsfc_analysis_rejects_zero_variance_inputs():
+    """QC:RSFC raises when correlations are undefined because variance is zero."""
+    with pytest.raises(ValueError, match="mean_qcs"):
+        analysis.qcrsfc_analysis(np.ones(4), np.column_stack([np.arange(4), np.arange(4) + 1]))
+    with pytest.raises(ValueError, match="zero variance"):
+        analysis.qcrsfc_analysis(
+            np.arange(4.0),
+            np.column_stack([np.arange(4.0), np.ones(4)]),
+        )
+
+
+def test_qcrsfc_analysis_rejects_zero_variance_after_covariate_adjustment():
+    """Covariate adjustment cannot leave QC or FC with zero residual variance."""
+    covariate = np.arange(4.0)[:, None]
+    with pytest.raises(ValueError, match="mean_qcs"):
+        analysis.qcrsfc_analysis(
+            np.arange(4.0),
+            np.column_stack([np.arange(4.0), np.arange(4.0) ** 2]),
+            run_covariates=covariate,
+        )
 
 
 def test_scrubbing_analysis_inclusion_and_value():
@@ -118,6 +183,26 @@ def test_scrubbing_analysis_length_assertion():
         analysis.scrubbing_analysis([qc, qc], [ts], np.arange(3))
 
 
+def test_scrubbing_analysis_rejects_time_by_roi_input():
+    """Time-by-ROI arrays raise a clear error instead of correlating timepoints."""
+    rng = np.random.RandomState(0)
+    qc = np.concatenate([np.full(10, 0.1), np.full(10, 0.9)])
+    ts_time_by_roi = rng.normal(size=(20, 3))
+
+    with pytest.raises(ValueError, match="ROIs by timepoints"):
+        analysis.scrubbing_analysis([qc], [ts_time_by_roi], np.arange(3), qc_thresh=0.2)
+
+
+def test_scrubbing_analysis_no_qualifying_subjects_raises():
+    """Scrubbing reports a clear error when no subjects have usable censoring."""
+    rng = np.random.RandomState(0)
+    ts = rng.normal(size=(3, 20))
+    qc_all_kept = np.full(20, 0.1)
+
+    with pytest.raises(ValueError, match="No subjects retained"):
+        analysis.scrubbing_analysis([qc_all_kept], [ts], np.arange(3), qc_thresh=0.2)
+
+
 def _make_scrubbing_inputs(n_subjects=4, n_rois=3, n_tps=20, seed=0):
     rng = np.random.RandomState(seed)
     qc_values = [np.concatenate([np.full(10, 0.1), np.full(10, 0.9)]) for _ in range(n_subjects)]
@@ -139,6 +224,25 @@ def test_scrubbing_null_distribution_shape_and_determinism():
     assert out1.shape == (n_iters, 3)
     # Seeds are fixed per-iteration, so repeated calls are identical.
     assert np.array_equal(out1, out2)
+
+
+def test_scrubbing_null_iter_advances_rng_across_subjects(monkeypatch):
+    """Within an iteration, each subject should get an independent permutation draw."""
+    captured_qcs = []
+
+    def capture_qcs(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=0.2, perm=True):
+        captured_qcs.extend(qc_values)
+        return np.zeros(edge_sorting_idx.size)
+
+    monkeypatch.setattr(analysis, "scrubbing_analysis", capture_qcs)
+    qcs = [np.arange(20), np.arange(20)]
+    ts_all = [np.zeros((3, 20)), np.zeros((3, 20))]
+    analysis._scrubbing_null_iter(
+        qcs, ts_all, qc_thresh=0.2, edge_sorting_idx=np.arange(3), seed=0
+    )
+
+    assert len(captured_qcs) == 2
+    assert not np.array_equal(captured_qcs[0], captured_qcs[1])
 
 
 def test_other_null_distributions_shape_and_determinism():

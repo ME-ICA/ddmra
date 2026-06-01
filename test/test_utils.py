@@ -13,50 +13,52 @@ from ddmra import utils
 def test_null_to_p_float():
     """Test utils.null_to_p with single float input, assuming asymmetric null dist."""
     null = [-10, -9, -9, -3, -2, -1, -1, 0, 1, 1, 1, 2, 3, 3, 4, 4, 7, 8, 8, 9]
+    denom = len(null) + 1
 
     # Two-tailed
-    assert math.isclose(utils.null_to_p(0, null, "two"), 0.8)
-    assert math.isclose(utils.null_to_p(9, null, "two"), 0.1)
-    assert math.isclose(utils.null_to_p(10, null, "two"), 0.05)
-    assert math.isclose(utils.null_to_p(-9, null, "two"), 0.3)
-    assert math.isclose(utils.null_to_p(-10, null, "two"), 0.1)
-    # Still 0.05 because minimum valid p-value is 1 / len(null)
+    assert math.isclose(utils.null_to_p(0, null, "two"), 18 / denom)
+    assert math.isclose(utils.null_to_p(9, null, "two"), 4 / denom)
+    assert math.isclose(utils.null_to_p(10, null, "two"), 2 / denom)
+    assert math.isclose(utils.null_to_p(-9, null, "two"), 8 / denom)
+    assert math.isclose(utils.null_to_p(-10, null, "two"), 4 / denom)
+    # The two-tailed minimum is doubled because it is based on two one-tailed p-values.
     result = utils.null_to_p(20, null, "two")
     assert result == utils.null_to_p(-20, null, "two")
-    assert math.isclose(result, 0.05)
+    assert math.isclose(result, 2 / denom)
 
     # Left/lower-tailed
-    assert math.isclose(utils.null_to_p(9, null, "lower"), 0.95)
-    assert math.isclose(utils.null_to_p(-9, null, "lower"), 0.15)
-    assert math.isclose(utils.null_to_p(0, null, "lower"), 0.4)
+    assert math.isclose(utils.null_to_p(9, null, "lower"), 1)
+    assert math.isclose(utils.null_to_p(-9, null, "lower"), 4 / denom)
+    assert math.isclose(utils.null_to_p(0, null, "lower"), 9 / denom)
 
     # Right/upper-tailed
-    assert math.isclose(utils.null_to_p(9, null, "upper"), 0.05)
-    assert math.isclose(utils.null_to_p(-9, null, "upper"), 0.95)
-    assert math.isclose(utils.null_to_p(0, null, "upper"), 0.65)
+    assert math.isclose(utils.null_to_p(9, null, "upper"), 2 / denom)
+    assert math.isclose(utils.null_to_p(-9, null, "upper"), 20 / denom)
+    assert math.isclose(utils.null_to_p(0, null, "upper"), 14 / denom)
 
-    # Test that 1/n(null) is preserved with extreme values
+    # Test the plus-one correction with extreme values.
     nulldist = np.random.normal(size=10000)
-    assert math.isclose(utils.null_to_p(20, nulldist, "two"), 1 / 10000)
-    assert math.isclose(utils.null_to_p(20, nulldist, "lower"), 1 - 1 / 10000)
+    assert math.isclose(utils.null_to_p(20, nulldist, "two"), 2 / 10001)
+    assert math.isclose(utils.null_to_p(20, nulldist, "upper"), 1 / 10001)
+    assert math.isclose(utils.null_to_p(20, nulldist, "lower"), 1)
 
 
 def test_null_to_p_float_symmetric():
     """Test utils.null_to_p with single float input, assuming symmetric null dist."""
     null = [-10, -9, -9, -3, -2, -1, -1, 0, 1, 1, 1, 2, 3, 3, 4, 4, 7, 8, 8, 9]
+    denom = len(null) + 1
 
     # Only need to test two-tailed; symmetry is irrelevant for one-tailed
-    assert math.isclose(utils.null_to_p(0, null, "two", symmetric=True), 0.95)
+    assert math.isclose(utils.null_to_p(0, null, "two", symmetric=True), 1)
     result = utils.null_to_p(9, null, "two", symmetric=True)
     assert result == utils.null_to_p(-9, null, "two", symmetric=True)
-    assert math.isclose(result, 0.2)
+    assert math.isclose(result, 5 / denom)
     result = utils.null_to_p(10, null, "two", symmetric=True)
     assert result == utils.null_to_p(-10, null, "two", symmetric=True)
-    assert math.isclose(result, 0.05)
-    # Still 0.05 because minimum valid p-value is 1 / len(null)
+    assert math.isclose(result, 2 / denom)
     result = utils.null_to_p(20, null, "two", symmetric=True)
     assert result == utils.null_to_p(-20, null, "two", symmetric=True)
-    assert math.isclose(result, 0.05)
+    assert math.isclose(result, 1 / denom)
 
 
 def test_null_to_p_array():
@@ -66,7 +68,7 @@ def test_null_to_p_array():
     t = np.sort(np.random.normal(size=N))
     p = np.sort(utils.null_to_p(t, nulldist))
     assert p.shape == (N,)
-    assert (p < 1).all()
+    assert (p <= 1).all()
     assert (p > 0).all()
     # Resulting distribution should be roughly uniform
     assert np.abs(p.mean() - 0.5) < 0.02
@@ -77,6 +79,12 @@ def test_null_to_p_invalid_tail():
     """An unrecognized ``tail`` argument should raise a ValueError."""
     with pytest.raises(ValueError, match="tail"):
         utils.null_to_p(0, [0, 1, 2, 3], tail="middle")
+
+
+def test_null_to_p_empty_null_raises():
+    """An empty null distribution cannot produce an empirical p-value."""
+    with pytest.raises(ValueError, match="at least one"):
+        utils.null_to_p(0, [])
 
 
 def test_null_to_p_large_array_reconstruction():
@@ -258,19 +266,6 @@ def test_get_rank_shape_assertions():
         utils.get_rank(np.ones(3), np.ones((4, 2)))  # width mismatch
 
 
-def test_rank_to_p():
-    """rank_to_p converts rank curves to intercept/slope p-values."""
-    distances = np.array([0.0, 35.0, 100.0])
-    rank_curve = np.array([10.0, 90.0, 40.0])
-    intercept_rank, intercept_p, rank_diff, rank_diff_p = utils.rank_to_p(
-        rank_curve, n_iters=100, distances=distances, intercept_distance=35, v2=100
-    )
-    assert math.isclose(intercept_rank, 90.0)
-    assert math.isclose(intercept_p, 1 - 90 / 100)
-    assert math.isclose(rank_diff, 90.0 - 40.0)
-    assert math.isclose(rank_diff_p, 1 - 50 / 100)
-
-
 def test_assess_significance():
     """A curve that exceeds every null curve gets the smallest possible p-values."""
     distances = np.array([0.0, 35.0, 50.0, 100.0, 150.0])
@@ -281,8 +276,8 @@ def test_assess_significance():
         curve, null_curves, distances, intercept_distance=35, v2=100
     )
     # intercept (10) and slope (10 - 0 = 10) both exceed all nulls -> minimum p.
-    assert math.isclose(p_inter, 1 / n_perms)
-    assert math.isclose(p_slope, 1 / n_perms)
+    assert math.isclose(p_inter, 1 / (n_perms + 1))
+    assert math.isclose(p_slope, 1 / (n_perms + 1))
 
 
 def test_assess_significance_shape_assertions():

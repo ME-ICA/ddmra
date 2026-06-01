@@ -55,6 +55,7 @@ ddmra is licensed under GNU Lesser General Public License version 2.1.
    :maxdepth: 2
    :caption: Contents:
 
+   methods
    api
    example_analysis.ipynb
 

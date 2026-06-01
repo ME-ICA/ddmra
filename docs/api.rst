@@ -24,6 +24,7 @@ API
    :toctree: generated/
 
    ddmra.workflows.run_analyses
+   ddmra.workflows.run_pipeline_comparison
 
 
 .. _api_analysis_ref:
