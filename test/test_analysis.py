@@ -33,6 +33,14 @@ def test_highlow_analysis_shape_assertions():
         analysis.highlow_analysis(np.ones(2), np.ones((3, 4)))
 
 
+def test_highlow_analysis_rejects_nonfinite_or_constant_qc():
+    """High-low analysis raises on inputs that would silently produce NaNs."""
+    with pytest.raises(ValueError, match="finite"):
+        analysis.highlow_analysis(np.array([1.0, np.nan, 3.0]), np.ones((3, 2)))
+    with pytest.raises(ValueError, match="nonzero variance"):
+        analysis.highlow_analysis(np.ones(3), np.arange(6.0).reshape(3, 2))
+
+
 def test_qcrsfc_analysis_signs_and_values():
     """QC:RSFC correlates each edge with QC across subjects, then z-transforms."""
     mean_qcs = np.array([1.0, 2.0, 3.0, 4.0])
@@ -79,7 +87,44 @@ def test_qcrsfc_analysis_shape_assertions():
     with pytest.raises(AssertionError):
         analysis.qcrsfc_analysis(np.ones(2), np.ones(3))
     with pytest.raises(ValueError, match="rows"):
-        analysis.qcrsfc_analysis(np.ones(2), np.ones((2, 3)), run_covariates=np.ones((3, 1)))
+        analysis.qcrsfc_analysis(
+            np.arange(2.0),
+            np.array([[1.0, 2.0, 3.0], [2.0, 3.0, 4.0]]),
+            run_covariates=np.ones((3, 1)),
+        )
+
+
+def test_qcrsfc_analysis_rejects_nonfinite_inputs():
+    """QC:RSFC raises on NaNs instead of producing silent NaN outputs."""
+    with pytest.raises(ValueError, match="mean_qcs"):
+        analysis.qcrsfc_analysis(np.array([1.0, np.nan, 3.0]), np.ones((3, 2)))
+    with pytest.raises(ValueError, match="z_corr_mats"):
+        analysis.qcrsfc_analysis(
+            np.arange(3.0),
+            np.array([[1.0, 2.0], [np.nan, 3.0], [4.0, 5.0]]),
+        )
+
+
+def test_qcrsfc_analysis_rejects_zero_variance_inputs():
+    """QC:RSFC raises when correlations are undefined because variance is zero."""
+    with pytest.raises(ValueError, match="mean_qcs"):
+        analysis.qcrsfc_analysis(np.ones(4), np.column_stack([np.arange(4), np.arange(4) + 1]))
+    with pytest.raises(ValueError, match="zero variance"):
+        analysis.qcrsfc_analysis(
+            np.arange(4.0),
+            np.column_stack([np.arange(4.0), np.ones(4)]),
+        )
+
+
+def test_qcrsfc_analysis_rejects_zero_variance_after_covariate_adjustment():
+    """Covariate adjustment cannot leave QC or FC with zero residual variance."""
+    covariate = np.arange(4.0)[:, None]
+    with pytest.raises(ValueError, match="mean_qcs"):
+        analysis.qcrsfc_analysis(
+            np.arange(4.0),
+            np.column_stack([np.arange(4.0), np.arange(4.0) ** 2]),
+            run_covariates=covariate,
+        )
 
 
 def test_scrubbing_analysis_inclusion_and_value():

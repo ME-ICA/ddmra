@@ -216,6 +216,12 @@ def test_prepare_run_covariates_encodes_numeric_and_categorical_columns():
     assert result.dtype == float
 
 
+def test_validate_qc_inputs_rejects_nonfinite_values():
+    """Workflow QC validation raises before NaNs can propagate into analyses."""
+    with pytest.raises(ValueError, match="finite"):
+        workflows._validate_qc_inputs([np.array([0.1, np.nan, 0.2])])
+
+
 def test_build_run_denoising_summary_includes_inferred_and_user_metrics():
     """Run denoising summaries include volume, confound, and user-provided metrics."""
     qc = [np.array([0.1, 0.3, 0.4]), np.array([0.0, 0.2, 0.5])]

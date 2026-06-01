@@ -162,14 +162,26 @@ def highlow_analysis(mean_qcs, z_corr_mats):
     3. Calculate the average z-transformed correlation coefficient for each group.
     4. Subtract the low group's value from the high group's value, for each ROI-ROI pair.
     """
+    mean_qcs = np.asarray(mean_qcs, dtype=float)
+    z_corr_mats = np.asarray(z_corr_mats, dtype=float)
+
     assert mean_qcs.ndim == 1, mean_qcs.ndim
     assert z_corr_mats.ndim == 2, z_corr_mats.ndim
     assert mean_qcs.shape[0] == z_corr_mats.shape[0], (
         f"{mean_qcs.shape[0]} != {z_corr_mats.shape[0]}"
     )
+    if not np.all(np.isfinite(mean_qcs)):
+        raise ValueError("mean_qcs must contain only finite values.")
+    if not np.all(np.isfinite(z_corr_mats)):
+        raise ValueError("z_corr_mats must contain only finite values.")
+    if np.isclose(np.var(mean_qcs), 0):
+        raise ValueError("mean_qcs must have nonzero variance for high-low analysis.")
 
     highgroup_idx = mean_qcs >= np.median(mean_qcs)
     lowgroup_idx = mean_qcs < np.median(mean_qcs)
+    if not np.any(highgroup_idx) or not np.any(lowgroup_idx):
+        raise ValueError("High-low analysis requires at least one run in each QC group.")
+
     highgroup_mean_z = np.mean(z_corr_mats[highgroup_idx, :], axis=0)
     lowgroup_mean_z = np.mean(z_corr_mats[lowgroup_idx, :], axis=0)
     hl_corr_diff = highgroup_mean_z - lowgroup_mean_z
@@ -178,8 +190,8 @@ def highlow_analysis(mean_qcs, z_corr_mats):
 
 def _residualize(values, covariates):
     """Remove covariate effects from one or more run-level variables."""
-    values = np.asarray(values)
-    covariates = np.asarray(covariates)
+    values = np.asarray(values, dtype=float)
+    covariates = np.asarray(covariates, dtype=float)
 
     if covariates.ndim != 2:
         raise ValueError("run_covariates must be a 2D array.")
@@ -190,10 +202,29 @@ def _residualize(values, covariates):
         )
     if covariates.shape[1] == 0:
         return values.copy()
+    if not np.all(np.isfinite(covariates)):
+        raise ValueError("run_covariates must contain only finite values.")
+    if not np.all(np.isfinite(values)):
+        raise ValueError("Values to residualize must contain only finite values.")
 
     design = np.column_stack((np.ones(covariates.shape[0]), covariates))
     betas = np.linalg.lstsq(design, values, rcond=None)[0]
     return values - design @ betas
+
+
+def _validate_qcrsfc_inputs(mean_qcs, z_corr_mats):
+    """Validate that QC:RSFC inputs can produce defined correlations."""
+    if not np.all(np.isfinite(mean_qcs)):
+        raise ValueError("mean_qcs must contain only finite values.")
+    if not np.all(np.isfinite(z_corr_mats)):
+        raise ValueError("z_corr_mats must contain only finite values.")
+    if np.isclose(np.var(mean_qcs), 0):
+        raise ValueError("mean_qcs must have nonzero variance for QC:RSFC.")
+
+    edge_variances = np.var(z_corr_mats, axis=0)
+    if np.any(np.isclose(edge_variances, 0)):
+        n_bad_edges = np.sum(np.isclose(edge_variances, 0))
+        raise ValueError(f"{n_bad_edges} FC edge(s) have zero variance across runs.")
 
 
 def qcrsfc_analysis(mean_qcs, z_corr_mats, run_covariates=None):
@@ -226,15 +257,20 @@ def qcrsfc_analysis(mean_qcs, z_corr_mats, run_covariates=None):
        across participants, for each ROI-ROI pair.
     4. Z-transform the edge-wise correlation coefficients.
     """
+    mean_qcs = np.asarray(mean_qcs, dtype=float)
+    z_corr_mats = np.asarray(z_corr_mats, dtype=float)
+
     assert mean_qcs.ndim == 1, mean_qcs.ndim
     assert z_corr_mats.ndim == 2, z_corr_mats.ndim
     assert mean_qcs.shape[0] == z_corr_mats.shape[0], (
         f"{mean_qcs.shape[0]} != {z_corr_mats.shape[0]}"
     )
+    _validate_qcrsfc_inputs(mean_qcs, z_corr_mats)
 
     if run_covariates is not None:
         mean_qcs = _residualize(mean_qcs, run_covariates)
         z_corr_mats = _residualize(z_corr_mats, run_covariates)
+        _validate_qcrsfc_inputs(mean_qcs, z_corr_mats)
 
     # Correlate each ROI pair's z-value against QC measure (usually FD) across subjects.
     qcrsfc_rs = fast_pearson(z_corr_mats.T, mean_qcs)

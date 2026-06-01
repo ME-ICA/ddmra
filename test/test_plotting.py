@@ -106,5 +106,9 @@ def test_plot_results_writes_png(tmp_path, analyses):
     try:
         plotting.plot_results(str(tmp_path))
         assert op.isfile(op.join(tmp_path, "analysis_results.png"))
+        if "qcrsfc" in analyses:
+            ylabels = [ax.get_ylabel() for ax in plt.gcf().axes]
+            assert any("mean QC" in label for label in ylabels)
+            assert not any("mean FD" in label for label in ylabels)
     finally:
         plt.close("all")

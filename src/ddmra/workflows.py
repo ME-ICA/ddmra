@@ -115,6 +115,22 @@ def _prepare_run_covariates(run_covariates, n_subjects):
     return covariates
 
 
+def _validate_qc_inputs(qc):
+    """Validate run-level QC time series."""
+    qc_arrays = []
+    for i_subj, subj_qc in enumerate(qc):
+        qc_arr = np.asarray(subj_qc, dtype=float)
+        if qc_arr.ndim != 1:
+            raise ValueError(f"QC values for run {i_subj} must be a 1D array.")
+        if qc_arr.size == 0:
+            raise ValueError(f"QC values for run {i_subj} cannot be empty.")
+        if not np.all(np.isfinite(qc_arr)):
+            raise ValueError(f"QC values for run {i_subj} must contain only finite values.")
+        qc_arrays.append(qc_arr)
+
+    return qc_arrays
+
+
 def _prepare_run_denoising_metrics(run_denoising_metrics, n_subjects):
     """Validate optional run-level denoising and data-loss metrics."""
     if run_denoising_metrics is None:
@@ -317,8 +333,8 @@ def run_analyses(
         size and order as distance column in ``smoothing_curves.tsv.gz``
         and number of rows is number of iterations for permutation analysis.
         The three arrays' keys are 'qcrsfc', 'highlow', and 'scrubbing'.
-    - ``ranks.tsv.gz``: Edgewise ranks of the observed analysis values against
-        the edgewise null distributions.
+    - ``ranks.tsv.gz``: Diagnostic edgewise ranks of the observed analysis values against
+        the edgewise null distributions. These ranks are not inferential p-values.
     - ``run_denoising_summary.tsv``: Run-level volume, confound-regressor, retention,
         and optional user-provided tDOF/data-loss accounting.
     - ``[analysis]_analysis.png``: Figure for each analysis.
@@ -367,6 +383,7 @@ def run_analyses(
     LGR.info("Preallocating matrices")
     n_subjects = len(files)
     assert len(qc) == n_subjects, f"{len(qc)} != {n_subjects}"
+    qc = _validate_qc_inputs(qc)
     if run_covariates is not None and "qcrsfc" not in analyses:
         LGR.info("Ignoring run_covariates because QC:RSFC analysis was not requested.")
         run_covariates = None

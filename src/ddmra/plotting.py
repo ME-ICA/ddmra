@@ -1,9 +1,9 @@
 """Generate distance-dependent motion-related artifact plots.
 
-The rank for the intercept (smoothing curve at 35mm) indexes general dependence
-on motion (i.e., a mix of global and focal effects), while the rank for the
-slope (difference in smoothing curve at 100mm and 35mm) indexes distance
-dependence (i.e., focal effects).
+The annotated p-values compare the observed smoothing-curve intercept at 35 mm
+and the 35-to-100 mm slope against permutation-derived null smoothing curves.
+Edgewise ranks, when written by the workflow, are diagnostics and are not used
+as inferential p-values.
 """
 
 import os.path as op
@@ -48,8 +48,8 @@ def plot_analysis(
         Number of null smoothing curves to plot in the figure. Default is 50.
     metric_name : None or str, optional
         Label for the Y-axis of the figure, indicating the analysis' metric's name.
-    ylim : tuple, optional
-        Y-limits.
+    ylim : int, optional
+        Decimal precision used when choosing Y-limits.
     fig : None or matplotlib.pyplot.Figure, optional
         Figure object.
     ax : None or matplotlib.pyplot.Axes, optional
@@ -128,10 +128,10 @@ def plot_analysis(
 
 
 def plot_results(in_dir):
-    """Plot the results for all three analyses from a workflow run and save to a file.
+    """Plot the available analyses from a workflow run and save to a file.
 
     This function leverages the output file structure of :func:`workflows.run_analyses`.
-    It writes out an image (analysis_results.png) to the output directory.
+    It writes out an image (``analysis_results.png``) to the output directory.
 
     Parameters
     ----------
@@ -139,7 +139,7 @@ def plot_results(in_dir):
         Path to the output directory of a ``run_analyses`` run.
     """
     METRIC_LABELS = {
-        "qcrsfc": r"QC:RSFC $z_{r}$" + "\n(QC = mean FD)",
+        "qcrsfc": r"QC:RSFC $z_{r}$" + "\n(QC = mean QC)",
         "highlow": "High-low motion\n" + r"${\Delta}z_{r}$",
         "scrubbing": "Scrubbing\n" + r"${\Delta}z_{r}$",
     }
@@ -152,7 +152,6 @@ def plot_results(in_dir):
     smoothing_curves = pd.read_table(op.join(in_dir, "smoothing_curves.tsv.gz"))
     null_curves = np.load(op.join(in_dir, "null_smoothing_curves.npz"))
 
-    # Number of analyses is
     found_analyses = [lab for lab in METRIC_LABELS.keys() if lab in analysis_values.columns]
     n_analyses = len(found_analyses)
 
