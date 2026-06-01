@@ -229,8 +229,7 @@ def _build_run_denoising_summary(files, qc, confounds, qc_thresh, run_denoising_
             "n_qc_missing": n_qc_missing,
             "n_volumes_at_or_below_qc_thresh": n_volumes_at_or_below_thresh,
             "n_volumes_above_qc_thresh": n_volumes_above_thresh,
-            "proportion_volumes_at_or_below_qc_thresh": n_volumes_at_or_below_thresh
-            / n_volumes,
+            "proportion_volumes_at_or_below_qc_thresh": n_volumes_at_or_below_thresh / n_volumes,
             "proportion_volumes_above_qc_thresh": n_volumes_above_thresh / n_volumes,
             "n_confounds": n_confounds,
             "nominal_t_dof_after_confounds": n_volumes - n_confounds,
@@ -1408,8 +1407,7 @@ def run_analyses(
             100,
         )
         LGR.info(
-            f"For {analysis_name} analysis, intercept (p = {p_inter}); "
-            f"slope (p = {p_slope})."
+            f"For {analysis_name} analysis, intercept (p = {p_inter}); slope (p = {p_slope})."
         )
 
     np.savez_compressed(op.join(out_dir, "null_smoothing_curves.npz"), **null_curves_dict)
