@@ -1,11 +1,16 @@
 """DDMRA: A Python package for distance-dependent motion-related artifact analysis."""
 
-from ._version import get_versions
+from importlib.metadata import PackageNotFoundError, version
+
 from .analysis import highlow_analysis, qcrsfc_analysis, scrubbing_analysis
 from .plotting import plot_analysis, plot_results
 from .workflows import run_analyses
 
-__version__ = get_versions()["version"]
+try:
+    __version__ = version("ddmra")
+except PackageNotFoundError:
+    # Package is not installed
+    __version__ = "0+unknown"
 
 __all__ = [
     "__version__",

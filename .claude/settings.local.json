@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip show *)",
+      "Bash(pip3 --version)",
+      "Bash(pipx --version)",
+      "Bash(mkdir -p src)",
+      "Bash(git mv *)",
+      "Bash(git rm *)",
+      "Bash(grep -v '^\\\\.git$\\\\|^\\\\.claude$')",
+      "Bash(python3 -m venv /tmp/ddmra-venv)",
+      "Bash(/tmp/ddmra-venv/bin/python -m pip install --upgrade pip -q)",
+      "Bash(/tmp/ddmra-venv/bin/pip install *)",
+      "Bash(python3 -c 'import importlib,sys; importlib.import_module\\('\\\\''__TRACKED_VAR__'\\\\''\\); print\\('\\\\''OK   __TRACKED_VAR__'\\\\'', getattr\\(sys.modules['\\\\''__TRACKED_VAR__'\\\\''],'\\\\''__version__'\\\\'','\\\\''?'\\\\''\\)\\)')",
+      "Bash(command -v pipx uvx uv ruff)",
+      "Bash(pip install *)",
+      "Bash(uv venv *)",
+      "Bash(uv build *)",
+      "Bash(python3 -m zipfile -l dist/ddmra-*.whl)",
+      "Bash(awk '{print $1}')",
+      "Bash(VIRTUAL_ENV=/tmp/ddmra-venv uv pip install -e \".[tests,dev]\")",
+      "Bash(tar tzf *)",
+      "Bash(git check-ignore *)"
+    ]
+  }
+}

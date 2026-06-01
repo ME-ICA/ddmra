@@ -20,15 +20,11 @@
 import os
 import sys
 from datetime import datetime  # access current time and date
-from distutils.version import LooseVersion
-
-import sphinx
-import sphinx_rtd_theme
 
 import ddmra
 
 sys.path.insert(0, os.path.abspath("sphinxext"))
-sys.path.insert(0, os.path.abspath(os.path.pardir))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.pardir, "src")))
 
 from github_link import make_linkcode_resolve
 
@@ -55,12 +51,8 @@ extensions = [
     "sphinx.ext.linkcode",
     "sphinx.ext.napoleon",
     "sphinx.ext.todo",
+    "sphinx.ext.imgmath",
 ]
-
-if LooseVersion(sphinx.__version__) < LooseVersion("1.4"):
-    extensions.append("sphinx.ext.pngmath")
-else:
-    extensions.append("sphinx.ext.imgmath")
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]

@@ -1,4 +1,5 @@
 """Tests for the ddmra.utils module."""
+
 import math
 
 import numpy as np

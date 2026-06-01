@@ -5,6 +5,7 @@ on motion (i.e., a mix of global and focal effects), while the rank for the
 slope (difference in smoothing curve at 100mm and 35mm) indexes distance
 dependence (i.e., focal effects).
 """
+
 import os.path as op
 
 import matplotlib.pyplot as plt
