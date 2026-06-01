@@ -88,6 +88,33 @@ def _build_atlas_masker(atlas="power_2011", sphere_radius=5.0):
     return masker, coords
 
 
+def _prepare_run_covariates(run_covariates, n_subjects):
+    """Validate and encode run-level covariates for QC:RSFC adjustment."""
+    if run_covariates is None:
+        return None
+    if not isinstance(run_covariates, pd.DataFrame):
+        raise TypeError("run_covariates must be a pandas DataFrame.")
+    if run_covariates.shape[0] != n_subjects:
+        raise ValueError(
+            f"run_covariates has {run_covariates.shape[0]} rows, but {n_subjects} runs "
+            "were provided."
+        )
+    if run_covariates.shape[1] == 0:
+        raise ValueError("run_covariates must include at least one column.")
+    if run_covariates.isna().any().any():
+        raise ValueError("run_covariates cannot contain missing values.")
+
+    design = pd.get_dummies(run_covariates.reset_index(drop=True), drop_first=True, dtype=float)
+    if design.shape[1] == 0:
+        raise ValueError("run_covariates did not produce any usable covariate columns.")
+
+    covariates = design.to_numpy(dtype=float)
+    if not np.all(np.isfinite(covariates)):
+        raise ValueError("run_covariates must encode to finite numeric values.")
+
+    return covariates
+
+
 def _select_n_pca_components(varex_cumsum, pca_threshold):
     """Select a one-based PCA component count from cumulative explained variance."""
     if isinstance(pca_threshold, float):
@@ -120,6 +147,7 @@ def run_analyses(
     outlier_threshold=None,
     atlas="power_2011",
     sphere_radius=5.0,
+    run_covariates=None,
 ):
     """Run scrubbing, high-low motion, and QCRSFC analyses.
 
@@ -167,6 +195,11 @@ def run_analyses(
     sphere_radius : float, optional
         Radius in millimeters for sphere atlases. Ignored when ``atlas`` is a labels image.
         Default is 5.0.
+    run_covariates : None or pandas.DataFrame, optional
+        Run-level covariates to adjust for in the QC:RSFC analysis.
+        Rows must correspond to ``files`` in order. Numeric columns are used directly, and
+        categorical columns are dummy-coded with one reference level.
+        Default is None.
 
     Notes
     -----
@@ -229,6 +262,11 @@ def run_analyses(
     LGR.info("Preallocating matrices")
     n_subjects = len(files)
     assert len(qc) == n_subjects, f"{len(qc)} != {n_subjects}"
+    if run_covariates is not None and "qcrsfc" not in analyses:
+        LGR.info("Ignoring run_covariates because QC:RSFC analysis was not requested.")
+        run_covariates = None
+    else:
+        run_covariates = _prepare_run_covariates(run_covariates, n_subjects)
 
     # Load atlas and associated masker
     atlas_masker, coords = _build_atlas_masker(atlas=atlas, sphere_radius=sphere_radius)
@@ -309,6 +347,8 @@ def run_analyses(
     if ("qcrsfc" in analyses) or ("highlow" in analyses):
         z_corr_mats = z_corr_mats[good_subjects, :]
         mean_qc = mean_qc[good_subjects]
+        if run_covariates is not None:
+            run_covariates = run_covariates[good_subjects, :]
 
         # Assumes no periods in the filename except for the extension
         file_names = [op.basename(files[i]).split(".")[0] for i in good_subjects]
@@ -351,6 +391,8 @@ def run_analyses(
         if ("qcrsfc" in analyses) or ("highlow" in analyses):
             z_corr_mats = z_corr_mats[keep_idx, :]
             mean_qc = mean_qc[keep_idx]
+            if run_covariates is not None:
+                run_covariates = run_covariates[keep_idx, :]
             file_names = [file_names[i] for i in keep_idx]
 
         if "scrubbing" in analyses:
@@ -396,7 +438,9 @@ def run_analyses(
     if "qcrsfc" in analyses:
         # QC:RSFC r analysis
         LGR.info("Performing QC:RSFC analysis")
-        analysis_values["qcrsfc"] = analysis.qcrsfc_analysis(mean_qc, z_corr_mats)
+        analysis_values["qcrsfc"] = analysis.qcrsfc_analysis(
+            mean_qc, z_corr_mats, run_covariates=run_covariates
+        )
         qcrsfc_smoothing_curve = utils.moving_average(analysis_values["qcrsfc"], window)
         qcrsfc_smoothing_curve, qcrsfc_smoothing_curve_distances = utils.average_across_distances(
             qcrsfc_smoothing_curve,
@@ -464,6 +508,7 @@ def run_analyses(
         qcrsfc_null_values, hl_null_values = analysis.other_null_distributions(
             mean_qc,
             z_corr_mats,
+            run_covariates=run_covariates,
             n_iters=n_iters,
             n_jobs=n_jobs,
         )

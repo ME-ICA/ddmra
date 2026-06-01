@@ -176,7 +176,27 @@ def highlow_analysis(mean_qcs, z_corr_mats):
     return hl_corr_diff
 
 
-def qcrsfc_analysis(mean_qcs, z_corr_mats):
+def _residualize(values, covariates):
+    """Remove covariate effects from one or more run-level variables."""
+    values = np.asarray(values)
+    covariates = np.asarray(covariates)
+
+    if covariates.ndim != 2:
+        raise ValueError("run_covariates must be a 2D array.")
+    if covariates.shape[0] != values.shape[0]:
+        raise ValueError(
+            f"run_covariates has {covariates.shape[0]} rows, but {values.shape[0]} runs "
+            "were provided."
+        )
+    if covariates.shape[1] == 0:
+        return values.copy()
+
+    design = np.column_stack((np.ones(covariates.shape[0]), covariates))
+    betas = np.linalg.lstsq(design, values, rcond=None)[0]
+    return values - design @ betas
+
+
+def qcrsfc_analysis(mean_qcs, z_corr_mats, run_covariates=None):
     """Perform quality-control resting-state functional connectivity analysis.
 
     Parameters
@@ -187,6 +207,8 @@ def qcrsfc_analysis(mean_qcs, z_corr_mats):
         Z-transformed correlation coefficients for ROI-ROI pairs.
         n_edges is the *unique* ROI-to-ROI edges, not including self-self edges.
         These coefficients must be sorted according to ascending distance along the second axis.
+    run_covariates : None or numpy.ndarray of shape (n_subjects, n_covariates), optional
+        Run-level covariates to adjust for before correlating QC and FC.
 
     Returns
     -------
@@ -198,15 +220,21 @@ def qcrsfc_analysis(mean_qcs, z_corr_mats):
     The basic process for the QC:RSFC analysis is:
 
     1. Average QC values within each participant.
-    2. Correlate the mean QC values with z-transformed correlation coefficients
+    2. If run-level covariates are provided, regress them out of the mean QC values and
+       z-transformed correlation coefficients.
+    3. Correlate the mean QC values with z-transformed correlation coefficients
        across participants, for each ROI-ROI pair.
-    3. Z-transform the edge-wise correlation coefficients.
+    4. Z-transform the edge-wise correlation coefficients.
     """
     assert mean_qcs.ndim == 1, mean_qcs.ndim
     assert z_corr_mats.ndim == 2, z_corr_mats.ndim
     assert mean_qcs.shape[0] == z_corr_mats.shape[0], (
         f"{mean_qcs.shape[0]} != {z_corr_mats.shape[0]}"
     )
+
+    if run_covariates is not None:
+        mean_qcs = _residualize(mean_qcs, run_covariates)
+        z_corr_mats = _residualize(z_corr_mats, run_covariates)
 
     # Correlate each ROI pair's z-value against QC measure (usually FD) across subjects.
     qcrsfc_rs = fast_pearson(z_corr_mats.T, mean_qcs)
@@ -281,13 +309,13 @@ def scrubbing_null_distribution(
     return scrub_null_values
 
 
-def _other_null_iter(mean_qc, z_corr_mats, seed=0):
+def _other_null_iter(mean_qc, z_corr_mats, run_covariates=None, seed=0):
     # Prep for QC:RSFC and high-low motion analyses
     perm_mean_qc = np.random.RandomState(seed=seed).permutation(mean_qc)
     z_corr_mats = z_corr_mats.copy()
 
     # QC:RSFC analysis
-    perm_qcrsfc_zs = qcrsfc_analysis(perm_mean_qc, z_corr_mats)
+    perm_qcrsfc_zs = qcrsfc_analysis(perm_mean_qc, z_corr_mats, run_covariates=run_covariates)
 
     # High-low analysis
     perm_hl_diff = highlow_analysis(perm_mean_qc, z_corr_mats)
@@ -295,7 +323,7 @@ def _other_null_iter(mean_qc, z_corr_mats, seed=0):
     return perm_qcrsfc_zs, perm_hl_diff
 
 
-def other_null_distributions(mean_qc, z_corr_mats, n_iters=10000, n_jobs=1):
+def other_null_distributions(mean_qc, z_corr_mats, run_covariates=None, n_iters=10000, n_jobs=1):
     """Generate null distribution smoothing curves for QC:RSFC and high-low analyses.
 
     Parameters
@@ -304,6 +332,8 @@ def other_null_distributions(mean_qc, z_corr_mats, n_iters=10000, n_jobs=1):
         Mean QC value for each participant.
     z_corr_mats : numpy.ndarray of shape (n_subjects, n_roi_pairs)
         Z-transformed ROI-ROI correlation matrix for each participant.
+    run_covariates : None or numpy.ndarray of shape (n_subjects, n_covariates), optional
+        Run-level covariates to adjust for in QC:RSFC null distributions.
     n_iters : int, optional
         Number of iterations with which to build the null distributions. Default is 10000.
 
@@ -316,7 +346,10 @@ def other_null_distributions(mean_qc, z_corr_mats, n_iters=10000, n_jobs=1):
     """
     with tqdm_joblib(tqdm(desc="QCRSFC/HL null distributions", total=n_iters)):
         results = Parallel(n_jobs=n_jobs)(
-            delayed(_other_null_iter)(mean_qc, z_corr_mats, seed=seed) for seed in range(n_iters)
+            delayed(_other_null_iter)(
+                mean_qc, z_corr_mats, run_covariates=run_covariates, seed=seed
+            )
+            for seed in range(n_iters)
         )
 
     qcrsfc_null_values, hl_null_values = zip(*results)

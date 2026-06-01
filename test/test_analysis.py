@@ -54,12 +54,32 @@ def test_qcrsfc_analysis_signs_and_values():
     assert 0 < result[2] < np.arctanh(0.999)
 
 
+def test_qcrsfc_analysis_adjusts_for_run_covariates():
+    """QC:RSFC can partial out run-level covariates before edgewise correlations."""
+    covariate = np.repeat([0.0, 1.0], 4)
+    qc_residual = np.tile([-1.0, -0.5, 0.5, 1.0], 2)
+    mean_qcs = 10 * covariate + qc_residual
+    z_corr_mats = np.column_stack(
+        [
+            5 * covariate + np.array([1, -1, 1, -1, -1, 1, -1, 1]),
+            5 * covariate + qc_residual,
+        ]
+    )
+
+    result = analysis.qcrsfc_analysis(mean_qcs, z_corr_mats, run_covariates=covariate[:, None])
+
+    assert np.isclose(result[0], 0)
+    assert np.isclose(result[1], np.arctanh(0.999))
+
+
 def test_qcrsfc_analysis_shape_assertions():
     """qcrsfc_analysis enforces 1D QC, 2D corr matrices, and matching subjects."""
     with pytest.raises(AssertionError):
         analysis.qcrsfc_analysis(np.ones((2, 2)), np.ones((2, 3)))
     with pytest.raises(AssertionError):
         analysis.qcrsfc_analysis(np.ones(2), np.ones(3))
+    with pytest.raises(ValueError, match="rows"):
+        analysis.qcrsfc_analysis(np.ones(2), np.ones((2, 3)), run_covariates=np.ones((3, 1)))
 
 
 def test_scrubbing_analysis_inclusion_and_value():

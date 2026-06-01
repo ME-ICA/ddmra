@@ -12,6 +12,7 @@ import types
 
 import nibabel as nib
 import numpy as np
+import pandas as pd
 import pytest
 from nilearn.maskers import NiftiLabelsMasker, NiftiSpheresMasker
 
@@ -70,6 +71,19 @@ def test_run_analyses_qc_length_mismatch(tmp_path):
     """The number of QC arrays must match the number of files."""
     with pytest.raises(AssertionError):
         workflows.run_analyses(["a", "b"], [np.zeros(5)], out_dir=str(tmp_path))
+
+
+def test_run_analyses_run_covariates_length_mismatch(tmp_path):
+    """Run-level covariates must have one row per input run."""
+    run_covariates = pd.DataFrame({"age": [20, 30]})
+    with pytest.raises(ValueError, match="2 rows"):
+        workflows.run_analyses(
+            ["a"],
+            [np.zeros(5)],
+            out_dir=str(tmp_path),
+            analyses=("qcrsfc",),
+            run_covariates=run_covariates,
+        )
 
 
 def test_select_n_pca_components_float_threshold():
@@ -173,6 +187,21 @@ def test_build_atlas_masker_uses_labels_file(tmp_path):
 
     assert isinstance(masker, NiftiLabelsMasker)
     assert coords.shape == ATLAS_COORDS.shape
+
+
+def test_prepare_run_covariates_encodes_numeric_and_categorical_columns():
+    """Run covariates are validated and categorical columns are dummy-coded."""
+    run_covariates = pd.DataFrame(
+        {
+            "age": [20, 21, 22, 23],
+            "site": ["a", "a", "b", "c"],
+        }
+    )
+
+    result = workflows._prepare_run_covariates(run_covariates, n_subjects=4)
+
+    assert result.shape == (4, 3)
+    assert result.dtype == float
 
 
 @pytest.mark.integration
@@ -279,6 +308,33 @@ def test_run_analyses_with_confounds(tmp_path, monkeypatch):
         n_jobs=1,
         window=_WINDOW,
         analyses=("qcrsfc", "highlow"),
+    )
+    assert (out_dir / "analysis_values.tsv.gz").is_file()
+
+
+@pytest.mark.integration
+def test_run_analyses_with_run_covariates(tmp_path, monkeypatch):
+    """Run-level covariates are accepted by the QC:RSFC workflow."""
+    monkeypatch.setattr(
+        workflows.datasets, "fetch_coords_power_2011", lambda *a, **k: _fake_power_atlas()
+    )
+    out_dir = tmp_path / "out"
+    files, qc = _write_synthetic_images(tmp_path)
+    run_covariates = pd.DataFrame(
+        {
+            "age": np.linspace(20, 40, len(files)),
+            "site": np.repeat(["a", "b", "c"], 4),
+        }
+    )
+    workflows.run_analyses(
+        files,
+        qc,
+        out_dir=str(out_dir),
+        n_iters=2,
+        n_jobs=1,
+        window=_WINDOW,
+        analyses=("qcrsfc",),
+        run_covariates=run_covariates,
     )
     assert (out_dir / "analysis_values.tsv.gz").is_file()
 
