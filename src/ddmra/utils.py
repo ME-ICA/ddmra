@@ -345,10 +345,42 @@ def tqdm_joblib(tqdm_object):
         tqdm_object.close()
 
 
-def r2z(r_arr):
-    """Perform Fisher's r-to-z transform, cropping perfect correlations."""
-    # In case of perfect correlations, which is possible when no components are rejected,
-    # replace with high correlation.
-    r_arr = np.clip(r_arr, a_min=-0.999, a_max=0.999)
-    z_arr = np.arctanh(r_arr)
+# Maximum absolute correlation retained before Fisher z-transform. Fisher's z (arctanh)
+# diverges as |r| -> 1, so correlations are clipped to keep the output finite. The default
+# corresponds to |z| ~= 3.8.
+R2Z_CLIP = 0.999
+
+
+def r2z(r_arr, clip=R2Z_CLIP, return_n_clipped=False):
+    """Perform Fisher's r-to-z transform, clipping near-perfect correlations.
+
+    Fisher's z-transform diverges as ``|r|`` approaches 1, so correlations are clipped to
+    ``[-clip, clip]`` before transforming to keep the output finite. Near-perfect
+    correlations arise legitimately for very short-distance ROI pairs and when no variance
+    components are removed. Clipping compresses these most-extreme edges, biasing them
+    slightly toward zero on the z scale; the default ``clip`` of 0.999 maps to ``|z|`` of
+    about 3.8.
+
+    Parameters
+    ----------
+    r_arr : numpy.ndarray
+        Correlation coefficients to transform.
+    clip : float, optional
+        Maximum absolute correlation retained before transforming. Default is ``R2Z_CLIP``.
+    return_n_clipped : bool, optional
+        If True, also return the number of values whose magnitude exceeded ``clip`` and were
+        therefore clipped. Default is False.
+
+    Returns
+    -------
+    z_arr : numpy.ndarray
+        Fisher z-transformed values.
+    n_clipped : int
+        Number of clipped values. Only returned when ``return_n_clipped`` is True.
+    """
+    r_arr = np.asarray(r_arr, dtype=float)
+    n_clipped = int(np.sum(np.abs(r_arr) > clip))
+    z_arr = np.arctanh(np.clip(r_arr, a_min=-clip, a_max=clip))
+    if return_n_clipped:
+        return z_arr, n_clipped
     return z_arr

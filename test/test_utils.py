@@ -241,6 +241,19 @@ def test_r2z():
     assert utils.r2z(np.array([2.0]))[0] == utils.r2z(np.array([1.0]))[0]
 
 
+def test_r2z_reports_clipped_count():
+    """r2z can report how many values were clipped before transforming."""
+    r = np.array([0.1, 0.9999, -1.0, 0.5, 0.999])
+    z, n_clipped = utils.r2z(r, return_n_clipped=True)
+    # 0.9999 and -1.0 exceed the 0.999 limit; exactly-0.999 is not clipped.
+    assert n_clipped == 2
+    assert z.shape == r.shape
+    # A custom, looser clip changes both the count and the transformed values.
+    z_loose, n_loose = utils.r2z(r, clip=0.95, return_n_clipped=True)
+    assert n_loose == 3
+    assert math.isclose(z_loose[1], np.arctanh(0.95))
+
+
 def test_get_rank():
     """get_rank returns searchsorted ranks of values within null columns."""
     values = np.array([2.5, 0.0, 5.0])

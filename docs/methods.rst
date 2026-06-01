@@ -182,6 +182,12 @@ This convention differs from the original Power et al. implementation, but it
 keeps the direction of larger positive DDMRA effects similar across the
 implemented analyses.
 
+Because the scrubbing analysis Fisher-z-transforms raw connectivity, near-perfect
+short-distance edge correlations are clipped to ``+/-0.999`` before the transform to
+keep the Fisher-z values finite. The number of clipped full and scrubbed edge
+correlations is reported in the run log so that any compression of the most extreme
+edges is visible.
+
 Interpretation:
 
 - Larger effects indicate connectivity changes associated with removing

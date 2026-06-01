@@ -183,6 +183,24 @@ def test_scrubbing_analysis_length_assertion():
         analysis.scrubbing_analysis([qc, qc], [ts], np.arange(3))
 
 
+def test_scrubbing_analysis_logs_clipped_edge_count(caplog):
+    """Near-perfect edges are clipped before Fisher z, and the count is logged."""
+    rng = np.random.RandomState(3)
+    n_tps = 40
+    base = rng.normal(size=n_tps)
+    # ROIs 0 and 1 are near-identical (r > 0.999); ROI 2 is independent.
+    ts = np.vstack([base, base + 1e-6 * rng.normal(size=n_tps), rng.normal(size=n_tps)])
+    qc = np.concatenate([np.full(20, 0.1), np.full(20, 0.9)])  # 50% kept -> included
+
+    with caplog.at_level("INFO", logger="analysis"):
+        analysis.scrubbing_analysis([qc], [ts], np.arange(3), qc_thresh=0.2, perm=False)
+
+    clip_messages = [r.message for r in caplog.records if "clipped" in r.message]
+    assert clip_messages
+    # The single near-perfect edge is clipped in both the full and scrubbed correlations.
+    assert "clipped 1 full and 1 scrubbed" in clip_messages[0]
+
+
 def test_scrubbing_analysis_rejects_time_by_roi_input():
     """Time-by-ROI arrays raise a clear error instead of correlating timepoints."""
     rng = np.random.RandomState(0)

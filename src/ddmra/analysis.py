@@ -6,7 +6,7 @@ import numpy as np
 from joblib import Parallel, delayed
 from tqdm import tqdm
 
-from .utils import fast_pearson, r2z, tqdm_joblib
+from .utils import R2Z_CLIP, fast_pearson, r2z, tqdm_joblib
 
 LGR = logging.getLogger("analysis")
 
@@ -90,6 +90,8 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
     n_subjects = len(group_timeseries)
     delta_zs = np.zeros((n_subjects, n_pairs))
     c = 0  # included subject counter
+    n_clipped_raw = 0  # edge correlations clipped before Fisher z (full timeseries)
+    n_clipped_scrubbed = 0  # edge correlations clipped before Fisher z (scrubbed timeseries)
     for i_subj in range(n_subjects):
         ts_arr = np.asarray(group_timeseries[i_subj])
         qc_arr = np.asarray(qc_values[i_subj])
@@ -114,15 +116,25 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
             scrubbed_ts = ts_arr[:, keep_idx]
             raw_corrs = np.corrcoef(ts_arr)
             raw_corrs = raw_corrs[triu_idx]
-            raw_zs = r2z(raw_corrs)
+            raw_zs, n_clip_raw = r2z(raw_corrs, return_n_clipped=True)
             scrubbed_corrs = np.corrcoef(scrubbed_ts)
             scrubbed_corrs = scrubbed_corrs[triu_idx]
-            scrubbed_zs = r2z(scrubbed_corrs)
+            scrubbed_zs, n_clip_scrubbed = r2z(scrubbed_corrs, return_n_clipped=True)
+            n_clipped_raw += n_clip_raw
+            n_clipped_scrubbed += n_clip_scrubbed
             delta_zs[c, :] = raw_zs - scrubbed_zs  # opposite of Power
             c += 1
 
     if not perm:
         LGR.info(f"{c} of {n_subjects} subjects retained in scrubbing analysis")
+        # Short-distance edges can have near-perfect raw FC, so report how many edge
+        # correlations were clipped before the Fisher z-transform (see utils.r2z).
+        n_total = c * n_pairs
+        LGR.info(
+            f"Scrubbing analysis clipped {n_clipped_raw} full and {n_clipped_scrubbed} "
+            f"scrubbed edge correlations to +/-{R2Z_CLIP} before Fisher z-transform "
+            f"(out of {n_total} edge correlations each)."
+        )
 
     # Remove extra rows corresponding to bad subjects
     delta_zs = delta_zs[:c, :]
