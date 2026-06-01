@@ -3,6 +3,7 @@
 import logging
 import os.path as op
 import re
+import warnings
 from itertools import combinations
 from os import PathLike, makedirs
 
@@ -21,6 +22,12 @@ LGR = logging.getLogger("workflows")
 ALLOWED_ANALYSES = ("qcrsfc", "highlow", "scrubbing")
 COMPARISON_INTERCEPT_DISTANCE = 35
 COMPARISON_SLOPE_DISTANCE = 100
+# Minimum number of runs required to attempt analysis.
+MIN_SUBJECTS = 10
+# QC-FC estimates are unstable in small samples. Parkes et al. (2018) and Ciric
+# et al. (2017) show sampling variability dominates below roughly 30 runs, so warn
+# (but do not error) when the retained sample is in the MIN_SUBJECTS-to-this range.
+QCFC_STABILITY_N = 30
 
 
 def _reset_workflow_log_handler():
@@ -1000,6 +1007,13 @@ def run_analyses(
 
     Notes
     -----
+    At least ``MIN_SUBJECTS`` (10) runs must be retained for analysis, or a
+    :class:`ValueError` is raised. When the QC:RSFC or high-low analyses are requested and
+    fewer than ``QCFC_STABILITY_N`` (30) runs are retained, a :class:`UserWarning` is issued
+    because QC-FC estimates are unstable in small samples (Parkes et al., 2018; Ciric et al.,
+    2017); the analyses still run, but their intercept and slope summaries should be
+    interpreted with caution.
+
     This function writes out several files to out_dir:
     - ``analysis_values.tsv.gz``: Raw analysis values for analyses.
         Has four columns: distance, qcrsfc, scrubbing, and highlow.
@@ -1248,8 +1262,21 @@ def run_analyses(
         del corrs_df, mean_qc_df, file_names
 
     LGR.info(f"Retaining {n_subjects_remaining}/{n_subjects} subjects for analysis.")
-    if n_subjects_remaining < 10:
+    if n_subjects_remaining < MIN_SUBJECTS:
         raise ValueError("Too few subjects remaining for analysis.")
+
+    # QC-FC and high-low are cross-run associations whose estimates are unstable in
+    # small samples. Warn (but proceed) so users can interpret marginal-N results with care.
+    cross_run_analyses = ("qcrsfc" in analyses) or ("highlow" in analyses)
+    if cross_run_analyses and n_subjects_remaining < QCFC_STABILITY_N:
+        stability_msg = (
+            f"Only {n_subjects_remaining} runs were retained for analysis. QC-FC and "
+            f"high-low estimates are unstable below ~{QCFC_STABILITY_N} runs (Parkes et al., "
+            "2018; Ciric et al., 2017); interpret intercept and slope summaries with caution "
+            "and prefer larger samples."
+        )
+        LGR.warning(stability_msg)
+        warnings.warn(stability_msg, UserWarning, stacklevel=2)
 
     analysis_values = pd.DataFrame(columns=analyses, index=distances, dtype=float)
     analysis_values.index.name = "distance"

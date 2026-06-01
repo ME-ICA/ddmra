@@ -9,6 +9,7 @@ small synthetic atlas (patched in to avoid any network access) and synthetic
 import os.path as op
 import re
 import types
+import warnings
 
 import nibabel as nib
 import numpy as np
@@ -560,6 +561,58 @@ def test_run_analyses_end_to_end(tmp_path, monkeypatch):
     logged_ps = [float(p) for p in re.findall(r"p = ([0-9.]+)", log_text)]
     assert logged_ps
     assert all(0 <= p <= 1 for p in logged_ps)
+
+
+@pytest.mark.integration
+def test_run_analyses_warns_for_small_cross_run_sample(tmp_path, monkeypatch):
+    """QC-FC/high-low analyses warn (but proceed) when the sample is small."""
+    monkeypatch.setattr(
+        workflows.datasets, "fetch_coords_power_2011", lambda *a, **k: _fake_power_atlas()
+    )
+
+    out_dir = tmp_path / "out"
+    # 12 runs is above the hard MIN_SUBJECTS floor but below the QC-FC stability N.
+    files, qc = _write_synthetic_images(tmp_path, n_subjects=12)
+    assert workflows.MIN_SUBJECTS <= 12 < workflows.QCFC_STABILITY_N
+
+    with pytest.warns(UserWarning, match="unstable"):
+        workflows.run_analyses(
+            files,
+            qc,
+            out_dir=str(out_dir),
+            n_iters=2,
+            n_jobs=1,
+            window=_WINDOW,
+            analyses=("qcrsfc", "highlow"),
+        )
+
+    # The caveat is also recorded in the run log.
+    assert "unstable" in (out_dir / "log.tsv").read_text()
+
+
+@pytest.mark.integration
+def test_run_analyses_scrubbing_only_skips_stability_warning(tmp_path, monkeypatch):
+    """The small-sample QC-FC caveat does not apply to the within-run scrubbing analysis."""
+    monkeypatch.setattr(
+        workflows.datasets, "fetch_coords_power_2011", lambda *a, **k: _fake_power_atlas()
+    )
+
+    out_dir = tmp_path / "out"
+    files, qc = _write_synthetic_images(tmp_path, n_subjects=12)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        workflows.run_analyses(
+            files,
+            qc,
+            out_dir=str(out_dir),
+            n_iters=2,
+            n_jobs=1,
+            window=_WINDOW,
+            analyses=("scrubbing",),
+        )
+
+    assert not any("unstable" in str(w.message) for w in caught)
 
 
 @pytest.mark.integration

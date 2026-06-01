@@ -374,6 +374,10 @@ Practical guidance
   pipeline.
 - Treat data-loss and temporal degrees-of-freedom differences as part of the
   denoising result, not as incidental bookkeeping.
+- Use a sufficiently large sample. QC-FC and high-low estimates are unstable
+  in small samples, so ``ddmra`` warns when fewer than 30 runs are retained for
+  these analyses and refuses to run with fewer than 10 (Parkes et al., 2018;
+  Ciric et al., 2017).
 - Use enough permutations for the inferential claim. With 10000 permutations,
   the minimum p-value is approximately 0.0001.
 - Correct for multiple comparisons when making claims across many pipeline
