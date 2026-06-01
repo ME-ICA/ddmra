@@ -115,6 +115,102 @@ def _prepare_run_covariates(run_covariates, n_subjects):
     return covariates
 
 
+def _prepare_run_denoising_metrics(run_denoising_metrics, n_subjects):
+    """Validate optional run-level denoising and data-loss metrics."""
+    if run_denoising_metrics is None:
+        return None
+    if not isinstance(run_denoising_metrics, pd.DataFrame):
+        raise TypeError("run_denoising_metrics must be a pandas DataFrame.")
+    if run_denoising_metrics.shape[0] != n_subjects:
+        raise ValueError(
+            "run_denoising_metrics has "
+            f"{run_denoising_metrics.shape[0]} rows, but {n_subjects} runs were provided."
+        )
+    if run_denoising_metrics.isna().any().any():
+        raise ValueError("run_denoising_metrics cannot contain missing values.")
+    non_numeric = [
+        column
+        for column in run_denoising_metrics.columns
+        if not pd.api.types.is_numeric_dtype(run_denoising_metrics[column])
+    ]
+    if non_numeric:
+        raise TypeError(
+            "run_denoising_metrics columns must be numeric. "
+            f"Non-numeric columns: {', '.join(non_numeric)}."
+        )
+
+    return run_denoising_metrics.reset_index(drop=True)
+
+
+def _count_confounds(confounds, n_subjects):
+    """Count run-level confound regressors."""
+    if confounds is None:
+        return np.zeros(n_subjects, dtype=int)
+    if len(confounds) != n_subjects:
+        raise ValueError(
+            f"confounds has {len(confounds)} runs, but {n_subjects} files were provided."
+        )
+
+    counts = np.zeros(n_subjects, dtype=int)
+    for i_subj, subj_confounds in enumerate(confounds):
+        confounds_arr = np.asarray(subj_confounds)
+        if confounds_arr.ndim == 1:
+            counts[i_subj] = 1
+        elif confounds_arr.ndim == 2:
+            counts[i_subj] = confounds_arr.shape[1]
+        else:
+            raise ValueError(f"Confounds for run {i_subj} must be a 1D or 2D array.")
+
+    return counts
+
+
+def _build_run_denoising_summary(files, qc, confounds, qc_thresh, run_denoising_metrics):
+    """Build run-level tDOF and data-loss accounting table."""
+    n_subjects = len(files)
+    qc_arrays = [np.asarray(subj_qc) for subj_qc in qc]
+    n_volumes = np.array([subj_qc.size for subj_qc in qc_arrays], dtype=int)
+    n_qc_missing = np.array([np.sum(~np.isfinite(subj_qc)) for subj_qc in qc_arrays], dtype=int)
+    n_volumes_at_or_below_thresh = np.array(
+        [np.sum(subj_qc <= qc_thresh) for subj_qc in qc_arrays], dtype=int
+    )
+    n_volumes_above_thresh = np.array(
+        [np.sum(subj_qc > qc_thresh) for subj_qc in qc_arrays], dtype=int
+    )
+    n_confounds = _count_confounds(confounds, n_subjects)
+
+    summary = pd.DataFrame(
+        {
+            "input_index": np.arange(n_subjects),
+            "filename": [op.basename(file_) for file_ in files],
+            "n_volumes": n_volumes,
+            "mean_qc": [np.mean(subj_qc) for subj_qc in qc_arrays],
+            "qc_thresh": qc_thresh,
+            "n_qc_missing": n_qc_missing,
+            "n_volumes_at_or_below_qc_thresh": n_volumes_at_or_below_thresh,
+            "n_volumes_above_qc_thresh": n_volumes_above_thresh,
+            "proportion_volumes_at_or_below_qc_thresh": n_volumes_at_or_below_thresh
+            / n_volumes,
+            "proportion_volumes_above_qc_thresh": n_volumes_above_thresh / n_volumes,
+            "n_confounds": n_confounds,
+            "nominal_t_dof_after_confounds": n_volumes - n_confounds,
+            "retained_after_loading": False,
+            "retained_for_analysis": False,
+            "drop_reason": "",
+        }
+    )
+
+    if run_denoising_metrics is not None:
+        overlapping_columns = set(summary.columns).intersection(run_denoising_metrics.columns)
+        if overlapping_columns:
+            raise ValueError(
+                "run_denoising_metrics columns overlap with built-in summary columns: "
+                f"{', '.join(sorted(overlapping_columns))}."
+            )
+        summary = pd.concat([summary, run_denoising_metrics], axis=1)
+
+    return summary
+
+
 def _select_n_pca_components(varex_cumsum, pca_threshold):
     """Select a one-based PCA component count from cumulative explained variance."""
     if isinstance(pca_threshold, float):
@@ -148,6 +244,7 @@ def run_analyses(
     atlas="power_2011",
     sphere_radius=5.0,
     run_covariates=None,
+    run_denoising_metrics=None,
 ):
     """Run scrubbing, high-low motion, and QCRSFC analyses.
 
@@ -200,6 +297,12 @@ def run_analyses(
         Rows must correspond to ``files`` in order. Numeric columns are used directly, and
         categorical columns are dummy-coded with one reference level.
         Default is None.
+    run_denoising_metrics : None or pandas.DataFrame, optional
+        Run-level denoising and data-loss metrics to include in
+        ``run_denoising_summary.tsv``. Rows must correspond to ``files`` in order, and
+        columns must be numeric. Useful columns include upstream retained-volume counts,
+        censored-volume counts, or temporal degrees of freedom after denoising.
+        Default is None.
 
     Notes
     -----
@@ -216,6 +319,8 @@ def run_analyses(
         The three arrays' keys are 'qcrsfc', 'highlow', and 'scrubbing'.
     - ``ranks.tsv.gz``: Edgewise ranks of the observed analysis values against
         the edgewise null distributions.
+    - ``run_denoising_summary.tsv``: Run-level volume, confound-regressor, retention,
+        and optional user-provided tDOF/data-loss accounting.
     - ``[analysis]_analysis.png``: Figure for each analysis.
 
     If ``verbose`` is ``True``:
@@ -267,6 +372,15 @@ def run_analyses(
         run_covariates = None
     else:
         run_covariates = _prepare_run_covariates(run_covariates, n_subjects)
+    run_denoising_metrics = _prepare_run_denoising_metrics(run_denoising_metrics, n_subjects)
+    run_denoising_summary = _build_run_denoising_summary(
+        files,
+        qc,
+        confounds,
+        qc_thresh,
+        run_denoising_metrics,
+    )
+    drop_reasons = [[] for _ in range(n_subjects)]
 
     # Load atlas and associated masker
     atlas_masker, coords = _build_atlas_masker(atlas=atlas, sphere_radius=sphere_radius)
@@ -308,6 +422,7 @@ def run_analyses(
 
         if np.any(np.isnan(raw_ts)):
             LGR.warning(f"Time series of {files[i_subj]} contains NaNs. Dropping from analysis.")
+            drop_reasons[i_subj].append("timeseries_nan")
             skip_subject = True
 
         roi_variances = np.var(raw_ts, axis=1)
@@ -317,6 +432,7 @@ def run_analyses(
                 f"ROI(s) {bad_rois} for {files[i_subj]} have variance of 0. "
                 "Dropping from analysis."
             )
+            drop_reasons[i_subj].append("zero_variance_roi")
             skip_subject = True
 
         if skip_subject:
@@ -340,6 +456,8 @@ def run_analyses(
     good_subjects = np.array(good_subjects)
     n_subjects_remaining = good_subjects.size
     LGR.info(f"Retaining {n_subjects_remaining}/{n_subjects} after loading data.")
+    run_denoising_summary.loc[good_subjects, "retained_after_loading"] = True
+    analysis_subjects = good_subjects.copy()
 
     if "scrubbing" in analyses:
         qc = [qc[i] for i in good_subjects]
@@ -385,8 +503,12 @@ def run_analyses(
         cutoff = chi2.ppf(1 - outlier_threshold, pca_components.shape[1])
         outlier_idx = np.where(mahalanobis_distances > cutoff)[0]
         keep_idx = np.where(mahalanobis_distances <= cutoff)[0]
+        outlier_subjects = analysis_subjects[outlier_idx]
         LGR.info(f"Removing {outlier_idx.size} outliers of {mahalanobis_distances.size} runs.")
         n_subjects_remaining = keep_idx.size
+        for i_subj in outlier_subjects:
+            drop_reasons[i_subj].append("pca_mcd_outlier")
+        analysis_subjects = analysis_subjects[keep_idx]
 
         if ("qcrsfc" in analyses) or ("highlow" in analyses):
             z_corr_mats = z_corr_mats[keep_idx, :]
@@ -398,6 +520,15 @@ def run_analyses(
         if "scrubbing" in analyses:
             ts_all = [ts_all[i] for i in keep_idx]
             qc = [qc[i] for i in keep_idx]
+
+    run_denoising_summary.loc[analysis_subjects, "retained_for_analysis"] = True
+    run_denoising_summary["drop_reason"] = [";".join(reasons) for reasons in drop_reasons]
+    run_denoising_summary.to_csv(
+        op.join(out_dir, "run_denoising_summary.tsv"),
+        sep="\t",
+        lineterminator="\n",
+        index=False,
+    )
 
     if verbose and (("qcrsfc" in analyses) or ("highlow" in analyses)):
         LGR.info("Saving z-transformed file-wise correlation coefficients")

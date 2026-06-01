@@ -85,8 +85,8 @@ def null_to_p(test_value, null_array, tail="two", symmetric=False):
 
     Notes
     -----
-    P-values are clipped based on the number of elements in the null array.
-    Therefore no p-values of 0 or 1 should be produced.
+    P-values use the plus-one correction for randomly sampled permutations,
+    so the minimum possible p-value is ``1 / (len(null_array) + 1)``.
     When the null distribution is known to be symmetric and centered on zero,
     and two-tailed p-values are desired, use symmetric=True, as it is
     approximately twice as efficient computationally, and has lower variance.
@@ -97,6 +97,8 @@ def null_to_p(test_value, null_array, tail="two", symmetric=False):
     return_first = isinstance(test_value, (float, int))
     test_value = np.atleast_1d(test_value)
     null_array = np.array(null_array)
+    if null_array.size == 0:
+        raise ValueError("null_array must contain at least one value.")
 
     # For efficiency's sake, if there are more than 1000 values, pass only the unique
     # values through percentileofscore(), and then reconstruct.
@@ -109,7 +111,8 @@ def null_to_p(test_value, null_array, tail="two", symmetric=False):
     def compute_p(t, null):
         null = np.sort(null)
         idx = np.searchsorted(null, t, side="left").astype(float)
-        return 1 - idx / len(null)
+        n_extreme = len(null) - idx
+        return (n_extreme + 1) / (len(null) + 1)
 
     if tail == "two":
         if symmetric:
@@ -117,21 +120,16 @@ def null_to_p(test_value, null_array, tail="two", symmetric=False):
         else:
             p_l = compute_p(test_value, null_array)
             p_r = compute_p(test_value * -1, null_array * -1)
-            p = 2 * np.minimum(p_l, p_r)
+            p = np.minimum(1, 2 * np.minimum(p_l, p_r))
     elif tail == "lower":
         p = compute_p(test_value * -1, null_array * -1)
     else:
         p = compute_p(test_value, null_array)
 
-    # ensure p_value in the following range:
-    # smallest_value <= p_value <= (1.0 - smallest_value)
-    smallest_value = np.maximum(np.finfo(float).eps, 1.0 / len(null_array))
-    result = np.maximum(smallest_value, np.minimum(p, 1.0 - smallest_value))
-
     if reconstruct:
-        result = result[uniq_idx]
+        p = p[uniq_idx]
 
-    return result[0] if return_first else result
+    return p[0] if return_first else p
 
 
 def fast_pearson(X, y):

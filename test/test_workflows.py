@@ -86,6 +86,18 @@ def test_run_analyses_run_covariates_length_mismatch(tmp_path):
         )
 
 
+def test_run_analyses_run_denoising_metrics_length_mismatch(tmp_path):
+    """Run-level denoising metrics must have one row per input run."""
+    run_denoising_metrics = pd.DataFrame({"temporal_degrees_of_freedom": [30, 31]})
+    with pytest.raises(ValueError, match="2 rows"):
+        workflows.run_analyses(
+            ["a"],
+            [np.zeros(5)],
+            out_dir=str(tmp_path),
+            run_denoising_metrics=run_denoising_metrics,
+        )
+
+
 def test_select_n_pca_components_float_threshold():
     """Float thresholds retain the first component count that reaches the target."""
     n_components, perc_varex = workflows._select_n_pca_components(
@@ -204,6 +216,32 @@ def test_prepare_run_covariates_encodes_numeric_and_categorical_columns():
     assert result.dtype == float
 
 
+def test_build_run_denoising_summary_includes_inferred_and_user_metrics():
+    """Run denoising summaries include volume, confound, and user-provided metrics."""
+    qc = [np.array([0.1, 0.3, 0.4]), np.array([0.0, 0.2, 0.5])]
+    confounds = [np.zeros((3, 2)), np.zeros((3, 1))]
+    run_denoising_metrics = pd.DataFrame(
+        {
+            "n_volumes_retained_after_denoising": [2, 3],
+            "temporal_degrees_of_freedom": [1, 2],
+        }
+    )
+
+    summary = workflows._build_run_denoising_summary(
+        ["sub-01_bold.nii.gz", "sub-02_bold.nii.gz"],
+        qc,
+        confounds,
+        qc_thresh=0.2,
+        run_denoising_metrics=run_denoising_metrics,
+    )
+
+    assert summary["n_volumes"].tolist() == [3, 3]
+    assert summary["n_volumes_at_or_below_qc_thresh"].tolist() == [1, 2]
+    assert summary["n_confounds"].tolist() == [2, 1]
+    assert summary["nominal_t_dof_after_confounds"].tolist() == [1, 2]
+    assert summary["temporal_degrees_of_freedom"].tolist() == [1, 2]
+
+
 @pytest.mark.integration
 def test_run_analyses_end_to_end(tmp_path, monkeypatch):
     """Run the full workflow and confirm all expected output files are written."""
@@ -230,6 +268,7 @@ def test_run_analyses_end_to_end(tmp_path, monkeypatch):
         "smoothing_curves.tsv.gz",
         "null_smoothing_curves.npz",
         "ranks.tsv.gz",
+        "run_denoising_summary.tsv",
         "analysis_results.png",
         "log.tsv",
     ]
@@ -340,6 +379,40 @@ def test_run_analyses_with_run_covariates(tmp_path, monkeypatch):
 
 
 @pytest.mark.integration
+def test_run_analyses_writes_run_denoising_summary(tmp_path, monkeypatch):
+    """The workflow writes inferred and user-supplied denoising accounting."""
+    monkeypatch.setattr(
+        workflows.datasets, "fetch_coords_power_2011", lambda *a, **k: _fake_power_atlas()
+    )
+    out_dir = tmp_path / "out"
+    files, qc = _write_synthetic_images(tmp_path)
+    run_denoising_metrics = pd.DataFrame(
+        {
+            "n_volumes_retained_after_denoising": [IMG_SHAPE[-1] - 1] * len(files),
+            "temporal_degrees_of_freedom": [IMG_SHAPE[-1] - 3] * len(files),
+        }
+    )
+
+    workflows.run_analyses(
+        files,
+        qc,
+        out_dir=str(out_dir),
+        n_iters=2,
+        n_jobs=1,
+        window=_WINDOW,
+        analyses=("qcrsfc",),
+        run_denoising_metrics=run_denoising_metrics,
+    )
+
+    summary = pd.read_table(out_dir / "run_denoising_summary.tsv")
+    assert summary.shape[0] == len(files)
+    assert summary["n_volumes"].eq(IMG_SHAPE[-1]).all()
+    assert summary["n_volumes_retained_after_denoising"].eq(IMG_SHAPE[-1] - 1).all()
+    assert summary["temporal_degrees_of_freedom"].eq(IMG_SHAPE[-1] - 3).all()
+    assert summary["retained_for_analysis"].all()
+
+
+@pytest.mark.integration
 def test_run_analyses_skips_bad_subjects(tmp_path, monkeypatch):
     """A run with a zero-variance ROI is dropped, and the log records it."""
     monkeypatch.setattr(
@@ -360,6 +433,10 @@ def test_run_analyses_skips_bad_subjects(tmp_path, monkeypatch):
     assert (out_dir / "analysis_values.tsv.gz").is_file()
     log_text = (out_dir / "log.tsv").read_text()
     assert "variance of 0" in log_text
+    summary = pd.read_table(out_dir / "run_denoising_summary.tsv")
+    bad_run = summary.loc[summary["filename"] == "sub-bad_bold.nii.gz"].iloc[0]
+    assert not bad_run["retained_after_loading"]
+    assert "zero_variance_roi" in bad_run["drop_reason"]
 
 
 @pytest.mark.integration
