@@ -287,15 +287,6 @@ def assess_significance(curve, null_curves, distances, intercept_distance, v2):
     return p_inter, p_slope
 
 
-def rank_to_p(rank_curve, n_iters, distances, intercept_distance, v2):
-    intercept_rank = get_val(distances, rank_curve, intercept_distance)
-    rank_diff = intercept_rank - get_val(distances, rank_curve, v2)
-    intercept_p = 1 - (intercept_rank / n_iters)
-    rank_diff_p = 1 - (rank_diff / n_iters)
-
-    return intercept_rank, intercept_p, rank_diff, rank_diff_p
-
-
 def get_rank(values, null_values):
     assert values.ndim == 1
     assert null_values.ndim == 2

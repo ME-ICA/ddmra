@@ -258,19 +258,6 @@ def test_get_rank_shape_assertions():
         utils.get_rank(np.ones(3), np.ones((4, 2)))  # width mismatch
 
 
-def test_rank_to_p():
-    """rank_to_p converts rank curves to intercept/slope p-values."""
-    distances = np.array([0.0, 35.0, 100.0])
-    rank_curve = np.array([10.0, 90.0, 40.0])
-    intercept_rank, intercept_p, rank_diff, rank_diff_p = utils.rank_to_p(
-        rank_curve, n_iters=100, distances=distances, intercept_distance=35, v2=100
-    )
-    assert math.isclose(intercept_rank, 90.0)
-    assert math.isclose(intercept_p, 1 - 90 / 100)
-    assert math.isclose(rank_diff, 90.0 - 40.0)
-    assert math.isclose(rank_diff_p, 1 - 50 / 100)
-
-
 def test_assess_significance():
     """A curve that exceeds every null curve gets the smallest possible p-values."""
     distances = np.array([0.0, 35.0, 50.0, 100.0, 150.0])

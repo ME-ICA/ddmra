@@ -7,6 +7,7 @@ small synthetic atlas (patched in to avoid any network access) and synthetic
 """
 
 import os.path as op
+import re
 import types
 
 import nibabel as nib
@@ -164,12 +165,19 @@ def test_run_analyses_end_to_end(tmp_path, monkeypatch):
         "smoothing_curves.tsv.gz",
         "null_smoothing_curves.npz",
         "ranks.tsv.gz",
-        "rank_smoothing_curves.tsv.gz",
         "analysis_results.png",
         "log.tsv",
     ]
     for name in expected:
         assert (out_dir / name).is_file(), f"Missing expected output: {name}"
+
+    assert not (out_dir / "rank_smoothing_curves.tsv.gz").exists()
+
+    log_text = (out_dir / "log.tsv").read_text()
+    assert "rank =" not in log_text
+    logged_ps = [float(p) for p in re.findall(r"p = ([0-9.]+)", log_text)]
+    assert logged_ps
+    assert all(0 <= p <= 1 for p in logged_ps)
 
 
 @pytest.mark.integration

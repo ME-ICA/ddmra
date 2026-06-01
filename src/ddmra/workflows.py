@@ -94,6 +94,8 @@ def run_analyses(
         size and order as distance column in ``smoothing_curves.tsv.gz``
         and number of rows is number of iterations for permutation analysis.
         The three arrays' keys are 'qcrsfc', 'highlow', and 'scrubbing'.
+    - ``ranks.tsv.gz``: Edgewise ranks of the observed analysis values against
+        the edgewise null distributions.
     - ``[analysis]_analysis.png``: Figure for each analysis.
 
     If ``verbose`` is ``True``:
@@ -381,8 +383,6 @@ def run_analyses(
     # Null distributions
     LGR.info("Building null distributions with permutations")
     null_curves_dict = {}
-    rank_smoothing_curves = pd.DataFrame(columns=analyses, index=smoothing_curve_distances)
-    rank_smoothing_curves.index.name = "distance"
 
     if ("qcrsfc" in analyses) or ("highlow" in analyses):
         qcrsfc_null_values, hl_null_values = analysis.other_null_distributions(
@@ -396,13 +396,6 @@ def run_analyses(
             ranks_df["qcrsfc"] = utils.get_rank(
                 analysis_values["qcrsfc"].values, qcrsfc_null_values
             )
-            qcrsfc_ranks_smoothing_curves = utils.calculate_smoothing_curve(
-                ranks_df["qcrsfc"].values,
-                window,
-                distances,
-                smoothing_curve_distances,
-            )
-            rank_smoothing_curves["qcrsfc"] = qcrsfc_ranks_smoothing_curves.copy()
 
             qcrsfc_null_smoothing_curves = utils.calculate_smoothing_curve(
                 qcrsfc_null_values,
@@ -416,13 +409,6 @@ def run_analyses(
         if "highlow" in analyses:
             np.savez_compressed(op.join(out_dir, "hl_null.npz"), hl_null_values)
             ranks_df["highlow"] = utils.get_rank(analysis_values["highlow"].values, hl_null_values)
-            hl_ranks_smoothing_curves = utils.calculate_smoothing_curve(
-                ranks_df["highlow"].values,
-                window,
-                distances,
-                smoothing_curve_distances,
-            )
-            rank_smoothing_curves["highlow"] = hl_ranks_smoothing_curves.copy()
 
             hl_null_smoothing_curves = utils.calculate_smoothing_curve(
                 hl_null_values,
@@ -446,13 +432,6 @@ def run_analyses(
         ranks_df["scrubbing"] = utils.get_rank(
             analysis_values["scrubbing"].values, scrubbing_null_values
         )
-        scrubbing_ranks_smoothing_curves = utils.calculate_smoothing_curve(
-            ranks_df["scrubbing"].values,
-            window,
-            distances,
-            smoothing_curve_distances,
-        )
-        rank_smoothing_curves["scrubbing"] = scrubbing_ranks_smoothing_curves.copy()
 
         scrubbing_null_smoothing_curves = utils.calculate_smoothing_curve(
             scrubbing_null_values,
@@ -470,32 +449,25 @@ def run_analyses(
         lineterminator="\n",
         index=False,
     )
-    rank_smoothing_curves.reset_index(inplace=True)
-    rank_smoothing_curves.to_csv(
-        op.join(out_dir, "rank_smoothing_curves.tsv.gz"),
-        sep="\t",
-        lineterminator="\n",
-        index=False,
-    )
-
-    for analysis_name in analyses:
-        rank_inter, p_inter, rank_slope, p_slope = utils.rank_to_p(
-            rank_smoothing_curves[analysis_name].values,
-            n_iters,
-            rank_smoothing_curves["distance"].values,
-            35,
-            100,
-        )
-        LGR.info(
-            f"For {analysis_name} analysis, intercept (rank = {rank_inter}, p = {p_inter}); "
-            f"slope (rank = {rank_slope}, p = {p_slope})."
-        )
 
     for ana, null_curve in null_curves_dict.items():
         assert null_curve.shape == (
             n_iters,
             smoothing_curve_distances.size,
         ), f"{ana}: {null_curve.shape} != ({n_iters}, {smoothing_curve_distances.size})"
+
+    for analysis_name in analyses:
+        p_inter, p_slope = utils.assess_significance(
+            smoothing_curves[analysis_name].values,
+            null_curves_dict[analysis_name],
+            smoothing_curves["distance"].values,
+            35,
+            100,
+        )
+        LGR.info(
+            f"For {analysis_name} analysis, intercept (p = {p_inter}); "
+            f"slope (p = {p_slope})."
+        )
 
     np.savez_compressed(op.join(out_dir, "null_smoothing_curves.npz"), **null_curves_dict)
 
