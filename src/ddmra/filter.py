@@ -36,18 +36,20 @@ def respiration_iirnotch(TR_in_sec, bpm_min=18.582, bpm_max=25.7263):
     return b, a
 
 
-def filter_earl(motpars, t_r, radius=50):
+def filter_earl(motpars, t_r, radius=50, rotation_unit="rad"):
     """Apply Earl filter to motion parameters.
 
     Parameters
     ----------
     motpars : (T, 6) array_like
         Raw motion parameters. First three columns are translations and last
-        three are rotations. Rotations in degrees.
+        three are rotations.
     t_r : :obj:`float`
         Repetition time in seconds.
     radius : :obj:`float`, optional
         Head radius for conversion of rotation units to distance at the edge of the brain.
+    rotation_unit : {"deg", "rad"}, optional
+        Unit for the three rotation columns in ``motpars``. Default is "rad".
 
     Returns
     -------
@@ -62,6 +64,11 @@ def filter_earl(motpars, t_r, radius=50):
     filt_moco = signal.filtfilt(b, a, filt_moco2, axis=0, padtype=None)
 
     # Calculate FD values for the series
-    fd = get_fd_power(filt_moco, order=["x", "y", "z", "r", "p", "ya"], unit="rad", radius=radius)
+    fd = get_fd_power(
+        filt_moco,
+        order=["x", "y", "z", "r", "p", "ya"],
+        unit=rotation_unit,
+        radius=radius,
+    )
 
     return filt_moco, fd

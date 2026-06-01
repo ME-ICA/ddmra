@@ -42,6 +42,20 @@ def test_filter_earl_shapes_and_first_fd():
     assert fd[0] == 0.0
 
 
+def test_filter_earl_rotation_unit_argument():
+    """Degree and radian inputs produce equivalent FD when declared correctly."""
+    rng = np.random.RandomState(1)
+    motpars_rad = rng.normal(scale=0.01, size=(100, 6))
+    motpars_rad[:, :3] = rng.normal(size=(100, 3))
+    motpars_deg = motpars_rad.copy()
+    motpars_deg[:, 3:] = motpars_deg[:, 3:] * (180.0 / np.pi)
+
+    _, fd_rad = ddmra_filter.filter_earl(motpars_rad, t_r=2.0, radius=50, rotation_unit="rad")
+    _, fd_deg = ddmra_filter.filter_earl(motpars_deg, t_r=2.0, radius=50, rotation_unit="deg")
+
+    assert np.allclose(fd_rad, fd_deg)
+
+
 def test_filter_earl_attenuates_respiration_band():
     """The filter should reduce power at the aliased respiration frequency."""
     t_r = 2.0
