@@ -157,6 +157,8 @@ def plot_results(in_dir):
     n_analyses = len(found_analyses)
 
     fig, axes = plt.subplots(figsize=(8, 8 * n_analyses), nrows=n_analyses)
+    # plt.subplots returns a bare Axes (not an array) when nrows == 1.
+    axes = np.atleast_1d(axes)
 
     for i_analysis, analysis_type in enumerate(found_analyses):
         label = METRIC_LABELS[analysis_type]

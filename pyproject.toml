@@ -71,7 +71,7 @@ version-file = "src/ddmra/_version.py"
 packages = ["src/ddmra"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/ddmra", "LICENSE", "README.md"]
+include = ["src/ddmra", "test", "LICENSE", "README.md"]
 
 # ---------------------------------------------------------------------------- #
 #                                   Ruff                                        #
@@ -107,7 +107,7 @@ known-first-party = ["ddmra"]
 
 [tool.pytest.ini_options]
 log_cli = true
-testpaths = ["src/ddmra/tests"]
+testpaths = ["test"]
 markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
 ]
@@ -120,7 +120,6 @@ markers = [
 branch = false
 source = ["ddmra"]
 omit = [
-    "*/tests/*",
     "*/due.py",
     "*/_version.py",
 ]
