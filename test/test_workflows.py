@@ -656,6 +656,33 @@ def test_run_analyses_writes_qcrsfc_summary(tmp_path, monkeypatch):
 
 
 @pytest.mark.integration
+def test_run_analyses_highlow_cut_changes_result(tmp_path, monkeypatch):
+    """The high-low split fraction propagates through the workflow and changes the result."""
+    monkeypatch.setattr(
+        workflows.datasets, "fetch_coords_power_2011", lambda *a, **k: _fake_power_atlas()
+    )
+    files, qc = _write_synthetic_images(tmp_path)
+
+    median_dir = tmp_path / "median"
+    quartile_dir = tmp_path / "quartile"
+    for out_dir, cut in ((median_dir, 0.5), (quartile_dir, 0.25)):
+        workflows.run_analyses(
+            files,
+            qc,
+            out_dir=str(out_dir),
+            n_iters=2,
+            n_jobs=1,
+            window=_WINDOW,
+            analyses=("highlow",),
+            highlow_cut=cut,
+        )
+
+    median_vals = pd.read_table(median_dir / "analysis_values.tsv.gz")["highlow"]
+    quartile_vals = pd.read_table(quartile_dir / "analysis_values.tsv.gz")["highlow"]
+    assert not np.allclose(median_vals, quartile_vals)
+
+
+@pytest.mark.integration
 def test_run_analyses_with_labels_atlas_file(tmp_path):
     """The full workflow supports a local labels image atlas."""
     out_dir = tmp_path / "out"

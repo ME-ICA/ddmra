@@ -441,6 +441,7 @@ def _compute_pipeline_analysis_values(
     edge_sorting_idx,
     qc_thresh,
     run_covariates=None,
+    highlow_cut=0.5,
 ):
     """Compute one DDMRA analysis for one pipeline on an already-paired run set."""
     if analysis_name == "qcrsfc":
@@ -450,7 +451,9 @@ def _compute_pipeline_analysis_values(
             run_covariates=run_covariates,
         )
     if analysis_name == "highlow":
-        return analysis.highlow_analysis(mean_qc, pipeline_data["z_corr_mats"])
+        return analysis.highlow_analysis(
+            mean_qc, pipeline_data["z_corr_mats"], cut=highlow_cut
+        )
     if analysis_name == "scrubbing":
         return analysis.scrubbing_analysis(
             qc,
@@ -473,6 +476,7 @@ def _compute_pipeline_analysis_curves(
     distances,
     smoothing_curve_distances,
     run_covariates=None,
+    highlow_cut=0.5,
 ):
     """Compute smoothing curves for all requested analyses for one pipeline."""
     curves = {}
@@ -485,6 +489,7 @@ def _compute_pipeline_analysis_curves(
             edge_sorting_idx,
             qc_thresh,
             run_covariates=run_covariates,
+            highlow_cut=highlow_cut,
         )
         curves[analysis_name] = utils.calculate_smoothing_curve(
             values,
@@ -548,6 +553,7 @@ def _pipeline_pairwise_null_iter(
     distances,
     smoothing_curve_distances,
     run_covariates=None,
+    highlow_cut=0.5,
 ):
     """One paired within-run pipeline-label swap permutation."""
     rng = np.random.RandomState(seed=seed)
@@ -565,6 +571,7 @@ def _pipeline_pairwise_null_iter(
         distances,
         smoothing_curve_distances,
         run_covariates=run_covariates,
+        highlow_cut=highlow_cut,
     )
     second_curves = _compute_pipeline_analysis_curves(
         analyses,
@@ -577,6 +584,7 @@ def _pipeline_pairwise_null_iter(
         distances,
         smoothing_curve_distances,
         run_covariates=run_covariates,
+        highlow_cut=highlow_cut,
     )
 
     null_values = np.zeros((len(analyses), 2))
@@ -621,6 +629,7 @@ def _run_pipeline_pairwise_comparisons(
     atlas,
     sphere_radius,
     run_covariates,
+    highlow_cut=0.5,
 ):
     """Perform direct paired statistical comparisons between processing pipelines."""
     n_runs = file_table.shape[0]
@@ -686,6 +695,7 @@ def _run_pipeline_pairwise_comparisons(
             distances,
             smoothing_curve_distances,
             run_covariates=pair_run_covariates,
+            highlow_cut=highlow_cut,
         )
         second_curves = _compute_pipeline_analysis_curves(
             analyses,
@@ -698,6 +708,7 @@ def _run_pipeline_pairwise_comparisons(
             distances,
             smoothing_curve_distances,
             run_covariates=pair_run_covariates,
+            highlow_cut=highlow_cut,
         )
 
         with utils.tqdm_joblib(
@@ -720,6 +731,7 @@ def _run_pipeline_pairwise_comparisons(
                     distances,
                     smoothing_curve_distances,
                     run_covariates=pair_run_covariates,
+                    highlow_cut=highlow_cut,
                 )
                 for seed in range(n_iters)
             )
@@ -924,6 +936,7 @@ def run_pipeline_comparison(
             run_analyses_kwargs.get("atlas", "power_2011"),
             run_analyses_kwargs.get("sphere_radius", 5.0),
             run_analyses_kwargs.get("run_covariates", None),
+            run_analyses_kwargs.get("highlow_cut", 0.5),
         )
 
     return pipeline_outputs
@@ -946,6 +959,7 @@ def run_analyses(
     sphere_radius=5.0,
     run_covariates=None,
     run_denoising_metrics=None,
+    highlow_cut=0.5,
 ):
     """Run scrubbing, high-low motion, and QCRSFC analyses.
 
@@ -1004,6 +1018,11 @@ def run_analyses(
         columns must be numeric. Useful columns include upstream retained-volume counts,
         censored-volume counts, or temporal degrees of freedom after denoising.
         Default is None.
+    highlow_cut : float, optional
+        Fraction of runs assigned to each extreme QC group in the high-low analysis, in
+        ``(0, 0.5]``. ``0.5`` (default) is a median split; smaller values (e.g., ``0.25``
+        for top vs bottom quartiles) contrast the QC extremes and drop the middle runs.
+        See :func:`ddmra.analysis.highlow_analysis`.
 
     Notes
     -----
@@ -1332,7 +1351,9 @@ def run_analyses(
     if "highlow" in analyses:
         # High-low motion analysis
         LGR.info("Performing high-low motion analysis")
-        analysis_values["highlow"] = analysis.highlow_analysis(mean_qc, z_corr_mats)
+        analysis_values["highlow"] = analysis.highlow_analysis(
+            mean_qc, z_corr_mats, cut=highlow_cut
+        )
         hl_smoothing_curve = utils.moving_average(analysis_values["highlow"], window)
         hl_smoothing_curve, hl_smoothing_curve_distances = utils.average_across_distances(
             hl_smoothing_curve,
@@ -1386,6 +1407,7 @@ def run_analyses(
             mean_qc,
             z_corr_mats,
             run_covariates=run_covariates,
+            highlow_cut=highlow_cut,
             n_iters=n_iters,
             n_jobs=n_jobs,
         )

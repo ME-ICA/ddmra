@@ -43,6 +43,38 @@ def test_highlow_analysis_rejects_nonfinite_or_constant_qc():
         analysis.highlow_analysis(np.ones(3), np.arange(6.0).reshape(3, 2))
 
 
+def test_highlow_analysis_quartile_cut():
+    """A smaller cut contrasts the QC extremes and drops the middle runs."""
+    mean_qcs = np.arange(1.0, 9.0)  # 1..8
+    z_corr_mats = mean_qcs[:, None]  # one edge whose value equals each run's QC
+
+    # Median split: high = top 4 (mean 6.5), low = bottom 4 (mean 2.5).
+    median_result = analysis.highlow_analysis(mean_qcs, z_corr_mats, cut=0.5)
+    assert np.allclose(median_result, [4.0])
+
+    # Quartile split: high = top 2 (mean 7.5), low = bottom 2 (mean 1.5).
+    quartile_result = analysis.highlow_analysis(mean_qcs, z_corr_mats, cut=0.25)
+    assert np.allclose(quartile_result, [6.0])
+
+
+def test_highlow_analysis_median_split_assigns_center_to_high():
+    """With odd N, the median run goes to the high group (historical behavior)."""
+    mean_qcs = np.array([1.0, 2.0, 3.0])
+    z_corr_mats = mean_qcs[:, None]
+    # high = {2, 3} (mean 2.5), low = {1} (mean 1.0), diff = 1.5.
+    result = analysis.highlow_analysis(mean_qcs, z_corr_mats, cut=0.5)
+    assert np.allclose(result, [1.5])
+
+
+def test_highlow_analysis_rejects_invalid_cut():
+    """cut must lie in (0, 0.5]."""
+    mean_qcs = np.arange(1.0, 5.0)
+    z_corr_mats = mean_qcs[:, None]
+    for bad_cut in (0.0, -0.1, 0.6, 1.0):
+        with pytest.raises(ValueError, match="cut"):
+            analysis.highlow_analysis(mean_qcs, z_corr_mats, cut=bad_cut)
+
+
 def test_qcrsfc_analysis_signs_and_values():
     """QC:RSFC correlates each edge with QC across subjects, then z-transforms."""
     mean_qcs = np.array([1.0, 2.0, 3.0, 4.0])

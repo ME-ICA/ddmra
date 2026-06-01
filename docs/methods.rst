@@ -162,9 +162,13 @@ inference in ``ddmra`` is based on the smoothing-curve intercept and slope.
 High-low QC analysis
 --------------------
 
-The high-low analysis splits retained runs by median mean QC. For each edge, it
-subtracts the mean connectivity of the low-QC group from the mean connectivity
-of the high-QC group.
+The high-low analysis splits retained runs into high-QC and low-QC groups by
+mean QC. For each edge, it subtracts the mean connectivity of the low-QC group
+from the mean connectivity of the high-QC group. The split is controlled by the
+``highlow_cut`` fraction: ``0.5`` (default) is a median split that uses every
+run, while smaller values (for example ``0.25`` for the top and bottom quartiles)
+contrast the QC extremes and drop the middle runs. Extreme-group contrasts are
+more sensitive to motion effects but use fewer runs.
 
 Interpretation:
 
@@ -172,7 +176,7 @@ Interpretation:
   runs.
 - The analysis is intentionally simple and is useful as a complementary
   artifact benchmark.
-- Because it depends on a median split, it should not be treated as a substitute
+- Because it depends on a group split, it should not be treated as a substitute
   for covariate-adjusted QC-FC when continuous QC information and covariates are
   important.
 

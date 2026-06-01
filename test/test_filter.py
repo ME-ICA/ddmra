@@ -42,6 +42,20 @@ def test_filter_earl_shapes_and_first_fd():
     assert fd[0] == 0.0
 
 
+def test_filter_earl_custom_bpm_band():
+    """Custom respiration bounds reach respiration_iirnotch and change the filtering."""
+    rng = np.random.RandomState(2)
+    motpars = rng.normal(size=(100, 6))
+    default_filtered, _ = ddmra_filter.filter_earl(motpars, t_r=2.0)
+    custom_filtered, _ = ddmra_filter.filter_earl(
+        motpars, t_r=2.0, bpm_min=10.0, bpm_max=15.0
+    )
+    assert custom_filtered.shape == motpars.shape
+    assert np.all(np.isfinite(custom_filtered))
+    # A different respiration band notches different frequencies, so the output differs.
+    assert not np.allclose(default_filtered, custom_filtered)
+
+
 def test_filter_earl_rotation_unit_argument():
     """Degree and radian inputs produce equivalent FD when declared correctly."""
     rng = np.random.RandomState(1)

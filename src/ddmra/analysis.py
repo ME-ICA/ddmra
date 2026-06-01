@@ -153,7 +153,7 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
     return mean_delta_z
 
 
-def highlow_analysis(mean_qcs, z_corr_mats):
+def highlow_analysis(mean_qcs, z_corr_mats, cut=0.5):
     """Perform high-low QC analysis.
 
     Parameters
@@ -164,6 +164,13 @@ def highlow_analysis(mean_qcs, z_corr_mats):
         Z-transformed correlation coefficients for ROI-ROI pairs.
         n_edges is the *unique* ROI-to-ROI edges, not including self-self edges.
         These coefficients must be sorted according to ascending distance along the second axis.
+    cut : float, optional
+        Fraction of runs assigned to each extreme QC group, in ``(0, 0.5]``.
+        The high group is the top ``cut`` fraction of runs by QC, and the low group is the
+        bottom ``cut`` fraction. ``cut=0.5`` (default) is a median split that uses every run;
+        smaller values (e.g., ``0.25`` for top vs bottom quartiles) contrast the QC extremes
+        and drop the middle runs, which increases sensitivity to motion effects at the cost
+        of using fewer runs.
 
     Returns
     -------
@@ -175,13 +182,15 @@ def highlow_analysis(mean_qcs, z_corr_mats):
     The basic process for the high-low analysis is:
 
     1. Average QC values within each participant.
-    2. Split the participants into high-QC and low-QC groups using a median split.
+    2. Split the participants into high-QC and low-QC groups using the ``cut`` fraction.
     3. Calculate the average z-transformed correlation coefficient for each group.
     4. Subtract the low group's value from the high group's value, for each ROI-ROI pair.
     """
     mean_qcs = np.asarray(mean_qcs, dtype=float)
     z_corr_mats = np.asarray(z_corr_mats, dtype=float)
 
+    if not 0 < cut <= 0.5:
+        raise ValueError("cut must be in (0, 0.5].")
     if mean_qcs.ndim != 1:
         raise ValueError(f"mean_qcs must be a 1D array, not {mean_qcs.ndim}D.")
     if z_corr_mats.ndim != 2:
@@ -198,8 +207,15 @@ def highlow_analysis(mean_qcs, z_corr_mats):
     if np.isclose(np.var(mean_qcs), 0):
         raise ValueError("mean_qcs must have nonzero variance for high-low analysis.")
 
-    highgroup_idx = mean_qcs >= np.median(mean_qcs)
-    lowgroup_idx = mean_qcs < np.median(mean_qcs)
+    high_thresh = np.quantile(mean_qcs, 1 - cut)
+    low_thresh = np.quantile(mean_qcs, cut)
+    highgroup_idx = mean_qcs >= high_thresh
+    lowgroup_idx = mean_qcs <= low_thresh
+    # At cut=0.5 the two thresholds meet at the median, so runs exactly at the median would
+    # fall in both groups. Keep a clean partition by assigning them to the high group only
+    # (matching the historical median-split behavior).
+    overlap = highgroup_idx & lowgroup_idx
+    lowgroup_idx = lowgroup_idx & ~overlap
     if not np.any(highgroup_idx) or not np.any(lowgroup_idx):
         raise ValueError("High-low analysis requires at least one run in each QC group.")
 
@@ -465,7 +481,7 @@ def scrubbing_null_distribution(
     return scrub_null_values
 
 
-def _other_null_iter(mean_qc, z_corr_mats, run_covariates=None, seed=0):
+def _other_null_iter(mean_qc, z_corr_mats, run_covariates=None, highlow_cut=0.5, seed=0):
     # Prep for QC:RSFC and high-low motion analyses
     perm_mean_qc = np.random.RandomState(seed=seed).permutation(mean_qc)
     z_corr_mats = z_corr_mats.copy()
@@ -474,12 +490,14 @@ def _other_null_iter(mean_qc, z_corr_mats, run_covariates=None, seed=0):
     perm_qcrsfc_zs = qcrsfc_analysis(perm_mean_qc, z_corr_mats, run_covariates=run_covariates)
 
     # High-low analysis
-    perm_hl_diff = highlow_analysis(perm_mean_qc, z_corr_mats)
+    perm_hl_diff = highlow_analysis(perm_mean_qc, z_corr_mats, cut=highlow_cut)
 
     return perm_qcrsfc_zs, perm_hl_diff
 
 
-def other_null_distributions(mean_qc, z_corr_mats, run_covariates=None, n_iters=10000, n_jobs=1):
+def other_null_distributions(
+    mean_qc, z_corr_mats, run_covariates=None, highlow_cut=0.5, n_iters=10000, n_jobs=1
+):
     """Generate null distribution smoothing curves for QC:RSFC and high-low analyses.
 
     Parameters
@@ -490,6 +508,9 @@ def other_null_distributions(mean_qc, z_corr_mats, run_covariates=None, n_iters=
         Z-transformed ROI-ROI correlation matrix for each participant.
     run_covariates : None or numpy.ndarray of shape (n_subjects, n_covariates), optional
         Run-level covariates to adjust for in QC:RSFC null distributions.
+    highlow_cut : float, optional
+        Fraction of runs assigned to each extreme QC group in the high-low analysis.
+        Default is 0.5 (median split). See :func:`highlow_analysis`.
     n_iters : int, optional
         Number of iterations with which to build the null distributions. Default is 10000.
 
@@ -503,7 +524,11 @@ def other_null_distributions(mean_qc, z_corr_mats, run_covariates=None, n_iters=
     with tqdm_joblib(tqdm(desc="QCRSFC/HL null distributions", total=n_iters)):
         results = Parallel(n_jobs=n_jobs)(
             delayed(_other_null_iter)(
-                mean_qc, z_corr_mats, run_covariates=run_covariates, seed=seed
+                mean_qc,
+                z_corr_mats,
+                run_covariates=run_covariates,
+                highlow_cut=highlow_cut,
+                seed=seed,
             )
             for seed in range(n_iters)
         )

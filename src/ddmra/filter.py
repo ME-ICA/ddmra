@@ -36,7 +36,7 @@ def respiration_iirnotch(TR_in_sec, bpm_min=18.582, bpm_max=25.7263):
     return b, a
 
 
-def filter_earl(motpars, t_r, radius=50, rotation_unit="rad"):
+def filter_earl(motpars, t_r, radius=50, rotation_unit="rad", bpm_min=18.582, bpm_max=25.7263):
     """Apply Earl filter to motion parameters.
 
     Parameters
@@ -50,6 +50,11 @@ def filter_earl(motpars, t_r, radius=50, rotation_unit="rad"):
         Head radius for conversion of rotation units to distance at the edge of the brain.
     rotation_unit : {"deg", "rad"}, optional
         Unit for the three rotation columns in ``motpars``. Default is "rad".
+    bpm_min, bpm_max : :obj:`float`, optional
+        Minimum and maximum respiration rate, in breaths per minute, defining the band to
+        notch out. The defaults match the original Earl filter and are specific to the
+        acquisition it was developed on, so set them to the respiration band of your own
+        data when known.
 
     Returns
     -------
@@ -57,7 +62,7 @@ def filter_earl(motpars, t_r, radius=50, rotation_unit="rad"):
     fd_filtered : (T,) array_like
     """
     # Create the filter
-    b, a = respiration_iirnotch(t_r, bpm_min=18.582, bpm_max=25.7263)
+    b, a = respiration_iirnotch(t_r, bpm_min=bpm_min, bpm_max=bpm_max)
 
     # Filter motion numbers
     filt_moco2 = signal.filtfilt(b, a, motpars, axis=0, padtype=None)
