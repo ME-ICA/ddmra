@@ -221,7 +221,8 @@ def moving_average(values, window):
         the mean of values[750:1250]. Positions at the beginning and end will
         be NaNs.
     """
-    assert window % 2 == 0, "Window must be divisible by 2."
+    if window % 2 != 0:
+        raise ValueError("Window must be divisible by 2.")
 
     weights = np.ones(window) / window
     sma = np.convolve(values, weights, "valid")

@@ -25,13 +25,13 @@ from ddmra import workflows
 
 def test_run_analyses_requires_at_least_one_analysis(tmp_path):
     """An empty ``analyses`` tuple is rejected before any heavy work."""
-    with pytest.raises(AssertionError, match="At least one analysis"):
+    with pytest.raises(ValueError, match="At least one analysis"):
         workflows.run_analyses(["a"], [np.zeros(5)], out_dir=str(tmp_path), analyses=())
 
 
 def test_run_analyses_rejects_unknown_analysis(tmp_path):
     """Unknown analysis names are rejected."""
-    with pytest.raises(AssertionError, match="must be a tuple"):
+    with pytest.raises(ValueError, match="must be a tuple"):
         workflows.run_analyses(["a"], [np.zeros(5)], out_dir=str(tmp_path), analyses=("bogus",))
 
 
@@ -45,7 +45,7 @@ def test_run_analyses_requires_both_outlier_thresholds(tmp_path):
 
 def test_run_analyses_pca_threshold_out_of_range(tmp_path):
     """A float pca_threshold must be between 0 and 1."""
-    with pytest.raises(AssertionError, match="between 0 and 1"):
+    with pytest.raises(ValueError, match="between 0 and 1"):
         workflows.run_analyses(
             ["a"],
             [np.zeros(5)],
@@ -69,7 +69,7 @@ def test_run_analyses_bad_threshold_types(tmp_path):
 
 def test_run_analyses_qc_length_mismatch(tmp_path):
     """The number of QC arrays must match the number of files."""
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError, match="2 files were provided"):
         workflows.run_analyses(["a", "b"], [np.zeros(5)], out_dir=str(tmp_path))
 
 

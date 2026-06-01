@@ -64,14 +64,14 @@ def test_plot_analysis_accepts_existing_axes():
 
 
 def test_plot_analysis_shape_assertions():
-    """Inconsistent input shapes raise an AssertionError."""
+    """Inconsistent input shapes raise a ValueError."""
     data_points, distances, smoothing_curve, curve_distances, nulls = _make_plot_inputs(seed=2)
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         # data_points and distances must have matching shapes.
         plotting.plot_analysis(
             data_points[:-1], distances, smoothing_curve, curve_distances, nulls
         )
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         # null_smoothing_curves must be 2D.
         plotting.plot_analysis(data_points, distances, smoothing_curve, curve_distances, nulls[0])
 

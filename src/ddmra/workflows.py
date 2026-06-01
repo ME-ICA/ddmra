@@ -45,11 +45,13 @@ def _masker_kwargs():
 
 def _validate_analyses(analyses):
     """Validate and return requested DDMRA analyses."""
-    assert len(analyses) > 0, "At least one analysis must be selected."
-    assert all([a in ALLOWED_ANALYSES for a in analyses]), (
-        "Parameter 'analyses' must be a tuple of one or more of the following values: "
-        f"{', '.join(ALLOWED_ANALYSES)}"
-    )
+    if len(analyses) == 0:
+        raise ValueError("At least one analysis must be selected.")
+    if not all(a in ALLOWED_ANALYSES for a in analyses):
+        raise ValueError(
+            "Parameter 'analyses' must be a tuple of one or more of the following values: "
+            f"{', '.join(ALLOWED_ANALYSES)}"
+        )
     return tuple(analyses)
 
 
@@ -1030,7 +1032,8 @@ def run_analyses(
     elif isinstance(pca_threshold, int) and isinstance(outlier_threshold, float):
         LGR.info(f"Performing outlier detection on first {pca_threshold} PCA components.")
     elif isinstance(pca_threshold, float) and isinstance(outlier_threshold, float):
-        assert 0 < pca_threshold < 1, "Threshold must be between 0 and 1."
+        if not 0 < pca_threshold < 1:
+            raise ValueError("Threshold must be between 0 and 1.")
         LGR.info(
             "Performing outlier detection on PCA components explaining "
             f"{pca_threshold * 100}% of the variance."
@@ -1055,7 +1058,8 @@ def run_analyses(
 
     LGR.info("Preallocating matrices")
     n_subjects = len(files)
-    assert len(qc) == n_subjects, f"{len(qc)} != {n_subjects}"
+    if len(qc) != n_subjects:
+        raise ValueError(f"qc has {len(qc)} runs, but {n_subjects} files were provided.")
     qc = _validate_qc_inputs(qc)
     if run_covariates is not None and "qcrsfc" not in analyses:
         LGR.info("Ignoring run_covariates because QC:RSFC analysis was not requested.")
@@ -1108,7 +1112,10 @@ def run_analyses(
         else:
             raw_ts = atlas_masker.fit_transform(files[i_subj]).T
 
-        assert raw_ts.shape[0] == n_rois, f"{raw_ts.shape[0]} != {n_rois}"
+        if raw_ts.shape[0] != n_rois:
+            raise ValueError(
+                f"{files[i_subj]} produced {raw_ts.shape[0]} ROIs, but {n_rois} are expected."
+            )
 
         if np.any(np.isnan(raw_ts)):
             LGR.warning(f"Time series of {files[i_subj]} contains NaNs. Dropping from analysis.")

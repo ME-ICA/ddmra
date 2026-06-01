@@ -58,7 +58,11 @@ def scrubbing_analysis(qc_values, group_timeseries, edge_sorting_idx, qc_thresh=
        **WARNING** This is the opposite of how Power et al. did this!
     7. Average the difference values across participants.
     """
-    assert len(qc_values) == len(group_timeseries), f"{len(qc_values)} != {len(group_timeseries)}"
+    if len(qc_values) != len(group_timeseries):
+        raise ValueError(
+            f"qc_values has {len(qc_values)} entries but group_timeseries has "
+            f"{len(group_timeseries)}."
+        )
     if not group_timeseries:
         raise ValueError("At least one subject is required for scrubbing analysis.")
 
@@ -165,11 +169,15 @@ def highlow_analysis(mean_qcs, z_corr_mats):
     mean_qcs = np.asarray(mean_qcs, dtype=float)
     z_corr_mats = np.asarray(z_corr_mats, dtype=float)
 
-    assert mean_qcs.ndim == 1, mean_qcs.ndim
-    assert z_corr_mats.ndim == 2, z_corr_mats.ndim
-    assert mean_qcs.shape[0] == z_corr_mats.shape[0], (
-        f"{mean_qcs.shape[0]} != {z_corr_mats.shape[0]}"
-    )
+    if mean_qcs.ndim != 1:
+        raise ValueError(f"mean_qcs must be a 1D array, not {mean_qcs.ndim}D.")
+    if z_corr_mats.ndim != 2:
+        raise ValueError(f"z_corr_mats must be a 2D array, not {z_corr_mats.ndim}D.")
+    if mean_qcs.shape[0] != z_corr_mats.shape[0]:
+        raise ValueError(
+            f"mean_qcs has {mean_qcs.shape[0]} runs but z_corr_mats has "
+            f"{z_corr_mats.shape[0]}."
+        )
     if not np.all(np.isfinite(mean_qcs)):
         raise ValueError("mean_qcs must contain only finite values.")
     if not np.all(np.isfinite(z_corr_mats)):
@@ -260,11 +268,15 @@ def qcrsfc_analysis(mean_qcs, z_corr_mats, run_covariates=None):
     mean_qcs = np.asarray(mean_qcs, dtype=float)
     z_corr_mats = np.asarray(z_corr_mats, dtype=float)
 
-    assert mean_qcs.ndim == 1, mean_qcs.ndim
-    assert z_corr_mats.ndim == 2, z_corr_mats.ndim
-    assert mean_qcs.shape[0] == z_corr_mats.shape[0], (
-        f"{mean_qcs.shape[0]} != {z_corr_mats.shape[0]}"
-    )
+    if mean_qcs.ndim != 1:
+        raise ValueError(f"mean_qcs must be a 1D array, not {mean_qcs.ndim}D.")
+    if z_corr_mats.ndim != 2:
+        raise ValueError(f"z_corr_mats must be a 2D array, not {z_corr_mats.ndim}D.")
+    if mean_qcs.shape[0] != z_corr_mats.shape[0]:
+        raise ValueError(
+            f"mean_qcs has {mean_qcs.shape[0]} runs but z_corr_mats has "
+            f"{z_corr_mats.shape[0]}."
+        )
     _validate_qcrsfc_inputs(mean_qcs, z_corr_mats)
 
     if run_covariates is not None:

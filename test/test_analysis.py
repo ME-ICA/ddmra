@@ -25,11 +25,11 @@ def test_highlow_analysis():
 
 def test_highlow_analysis_shape_assertions():
     """highlow_analysis enforces 1D QC, 2D corr matrices, and matching subjects."""
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         analysis.highlow_analysis(np.ones((2, 2)), np.ones((2, 3)))
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         analysis.highlow_analysis(np.ones(2), np.ones(3))
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         analysis.highlow_analysis(np.ones(2), np.ones((3, 4)))
 
 
@@ -82,9 +82,9 @@ def test_qcrsfc_analysis_adjusts_for_run_covariates():
 
 def test_qcrsfc_analysis_shape_assertions():
     """qcrsfc_analysis enforces 1D QC, 2D corr matrices, and matching subjects."""
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         analysis.qcrsfc_analysis(np.ones((2, 2)), np.ones((2, 3)))
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         analysis.qcrsfc_analysis(np.ones(2), np.ones(3))
     with pytest.raises(ValueError, match="rows"):
         analysis.qcrsfc_analysis(
@@ -179,7 +179,7 @@ def test_scrubbing_analysis_length_assertion():
     """Mismatched QC and timeseries list lengths raise."""
     ts = np.random.RandomState(0).normal(size=(3, 20))
     qc = np.concatenate([np.full(10, 0.1), np.full(10, 0.9)])
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         analysis.scrubbing_analysis([qc, qc], [ts], np.arange(3))
 
 

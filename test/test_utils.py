@@ -112,8 +112,8 @@ def test_moving_average():
 
 
 def test_moving_average_odd_window_raises():
-    """An odd window size is not supported and should assert."""
-    with pytest.raises(AssertionError):
+    """An odd window size is not supported and should raise."""
+    with pytest.raises(ValueError, match="divisible by 2"):
         utils.moving_average(np.arange(10.0), window=3)
 
 
