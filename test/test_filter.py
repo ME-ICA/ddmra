@@ -47,9 +47,7 @@ def test_filter_earl_custom_bpm_band():
     rng = np.random.RandomState(2)
     motpars = rng.normal(size=(100, 6))
     default_filtered, _ = ddmra_filter.filter_earl(motpars, t_r=2.0)
-    custom_filtered, _ = ddmra_filter.filter_earl(
-        motpars, t_r=2.0, bpm_min=10.0, bpm_max=15.0
-    )
+    custom_filtered, _ = ddmra_filter.filter_earl(motpars, t_r=2.0, bpm_min=10.0, bpm_max=15.0)
     assert custom_filtered.shape == motpars.shape
     assert np.all(np.isfinite(custom_filtered))
     # A different respiration band notches different frequencies, so the output differs.

@@ -197,8 +197,7 @@ def highlow_analysis(mean_qcs, z_corr_mats, cut=0.5):
         raise ValueError(f"z_corr_mats must be a 2D array, not {z_corr_mats.ndim}D.")
     if mean_qcs.shape[0] != z_corr_mats.shape[0]:
         raise ValueError(
-            f"mean_qcs has {mean_qcs.shape[0]} runs but z_corr_mats has "
-            f"{z_corr_mats.shape[0]}."
+            f"mean_qcs has {mean_qcs.shape[0]} runs but z_corr_mats has {z_corr_mats.shape[0]}."
         )
     if not np.all(np.isfinite(mean_qcs)):
         raise ValueError("mean_qcs must contain only finite values.")
@@ -280,8 +279,7 @@ def _qcrsfc_correlations(mean_qcs, z_corr_mats, run_covariates=None):
         raise ValueError(f"z_corr_mats must be a 2D array, not {z_corr_mats.ndim}D.")
     if mean_qcs.shape[0] != z_corr_mats.shape[0]:
         raise ValueError(
-            f"mean_qcs has {mean_qcs.shape[0]} runs but z_corr_mats has "
-            f"{z_corr_mats.shape[0]}."
+            f"mean_qcs has {mean_qcs.shape[0]} runs but z_corr_mats has {z_corr_mats.shape[0]}."
         )
     _validate_qcrsfc_inputs(mean_qcs, z_corr_mats)
 

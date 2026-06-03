@@ -462,9 +462,7 @@ def _compute_pipeline_analysis_values(
             run_covariates=run_covariates,
         )
     if analysis_name == "highlow":
-        return analysis.highlow_analysis(
-            mean_qc, pipeline_data["z_corr_mats"], cut=highlow_cut
-        )
+        return analysis.highlow_analysis(mean_qc, pipeline_data["z_corr_mats"], cut=highlow_cut)
     if analysis_name == "scrubbing":
         return analysis.scrubbing_analysis(
             qc,
