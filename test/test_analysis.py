@@ -1,5 +1,7 @@
 """Tests for the ddmra.analysis module."""
 
+import math
+
 import numpy as np
 import pytest
 
@@ -25,11 +27,11 @@ def test_highlow_analysis():
 
 def test_highlow_analysis_shape_assertions():
     """highlow_analysis enforces 1D QC, 2D corr matrices, and matching subjects."""
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         analysis.highlow_analysis(np.ones((2, 2)), np.ones((2, 3)))
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         analysis.highlow_analysis(np.ones(2), np.ones(3))
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         analysis.highlow_analysis(np.ones(2), np.ones((3, 4)))
 
 
@@ -39,6 +41,38 @@ def test_highlow_analysis_rejects_nonfinite_or_constant_qc():
         analysis.highlow_analysis(np.array([1.0, np.nan, 3.0]), np.ones((3, 2)))
     with pytest.raises(ValueError, match="nonzero variance"):
         analysis.highlow_analysis(np.ones(3), np.arange(6.0).reshape(3, 2))
+
+
+def test_highlow_analysis_quartile_cut():
+    """A smaller cut contrasts the QC extremes and drops the middle runs."""
+    mean_qcs = np.arange(1.0, 9.0)  # 1..8
+    z_corr_mats = mean_qcs[:, None]  # one edge whose value equals each run's QC
+
+    # Median split: high = top 4 (mean 6.5), low = bottom 4 (mean 2.5).
+    median_result = analysis.highlow_analysis(mean_qcs, z_corr_mats, cut=0.5)
+    assert np.allclose(median_result, [4.0])
+
+    # Quartile split: high = top 2 (mean 7.5), low = bottom 2 (mean 1.5).
+    quartile_result = analysis.highlow_analysis(mean_qcs, z_corr_mats, cut=0.25)
+    assert np.allclose(quartile_result, [6.0])
+
+
+def test_highlow_analysis_median_split_assigns_center_to_high():
+    """With odd N, the median run goes to the high group (historical behavior)."""
+    mean_qcs = np.array([1.0, 2.0, 3.0])
+    z_corr_mats = mean_qcs[:, None]
+    # high = {2, 3} (mean 2.5), low = {1} (mean 1.0), diff = 1.5.
+    result = analysis.highlow_analysis(mean_qcs, z_corr_mats, cut=0.5)
+    assert np.allclose(result, [1.5])
+
+
+def test_highlow_analysis_rejects_invalid_cut():
+    """cut must lie in (0, 0.5]."""
+    mean_qcs = np.arange(1.0, 5.0)
+    z_corr_mats = mean_qcs[:, None]
+    for bad_cut in (0.0, -0.1, 0.6, 1.0):
+        with pytest.raises(ValueError, match="cut"):
+            analysis.highlow_analysis(mean_qcs, z_corr_mats, cut=bad_cut)
 
 
 def test_qcrsfc_analysis_signs_and_values():
@@ -82,9 +116,9 @@ def test_qcrsfc_analysis_adjusts_for_run_covariates():
 
 def test_qcrsfc_analysis_shape_assertions():
     """qcrsfc_analysis enforces 1D QC, 2D corr matrices, and matching subjects."""
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         analysis.qcrsfc_analysis(np.ones((2, 2)), np.ones((2, 3)))
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         analysis.qcrsfc_analysis(np.ones(2), np.ones(3))
     with pytest.raises(ValueError, match="rows"):
         analysis.qcrsfc_analysis(
@@ -92,6 +126,60 @@ def test_qcrsfc_analysis_shape_assertions():
             np.array([[1.0, 2.0, 3.0], [2.0, 3.0, 4.0]]),
             run_covariates=np.ones((3, 1)),
         )
+
+
+def test_qcrsfc_summary_metrics():
+    """qcrsfc_summary reports median |QC-FC| and the percentage of significant edges."""
+    mean_qcs = np.array([1.0, 2.0, 3.0, 4.0])
+    z_corr_mats = np.array(
+        [
+            [1.0, 4.0, 1.0],  # edge 0: r = +1, edge 1: r = -1, edge 2: r < 1
+            [2.0, 3.0, 2.0],
+            [3.0, 2.0, 3.0],
+            [4.0, 1.0, 5.0],
+        ]
+    )
+    summary = analysis.qcrsfc_summary(mean_qcs, z_corr_mats)
+
+    assert summary["n_runs"] == 4
+    assert summary["n_covariates"] == 0
+    assert summary["n_edges"] == 3
+    # Two edges are perfectly (anti)correlated, so the median absolute QC-FC is 1.0.
+    assert math.isclose(summary["median_abs_qcfc"], 1.0)
+    # The two perfectly correlated edges are always significant.
+    assert summary["n_significant_edges"] >= 2
+    assert math.isclose(
+        summary["percent_significant_edges"],
+        100.0 * summary["n_significant_edges"] / summary["n_edges"],
+    )
+    assert summary["alpha"] == 0.05
+
+
+def test_qcrsfc_summary_accounts_for_covariates():
+    """Covariates reduce the effective sample size used for QC-FC significance."""
+    covariate = np.repeat([0.0, 1.0], 4)
+    qc_residual = np.tile([-1.0, -0.5, 0.5, 1.0], 2)
+    mean_qcs = 10 * covariate + qc_residual
+    z_corr_mats = np.column_stack(
+        [
+            5 * covariate + np.array([1, -1, 1, -1, -1, 1, -1, 1]),
+            5 * covariate + qc_residual,
+        ]
+    )
+    summary = analysis.qcrsfc_summary(mean_qcs, z_corr_mats, run_covariates=covariate[:, None])
+    assert summary["n_runs"] == 8
+    assert summary["n_covariates"] == 1
+
+
+def test_qcrsfc_summary_validates_alpha_and_sample_size():
+    """qcrsfc_summary rejects an out-of-range alpha and too-small samples."""
+    mean_qcs = np.array([1.0, 2.0, 3.0, 4.0])
+    z_corr_mats = np.arange(12.0).reshape(4, 3) + np.array([0.0, 1.0, 2.0])
+    with pytest.raises(ValueError, match="alpha"):
+        analysis.qcrsfc_summary(mean_qcs, z_corr_mats, alpha=1.5)
+    # Two runs leave zero degrees of freedom for the correlation test.
+    with pytest.raises(ValueError, match="effective runs"):
+        analysis.qcrsfc_summary(np.array([1.0, 2.0]), np.array([[1.0, 2.0], [2.0, 1.0]]))
 
 
 def test_qcrsfc_analysis_rejects_nonfinite_inputs():
@@ -179,8 +267,26 @@ def test_scrubbing_analysis_length_assertion():
     """Mismatched QC and timeseries list lengths raise."""
     ts = np.random.RandomState(0).normal(size=(3, 20))
     qc = np.concatenate([np.full(10, 0.1), np.full(10, 0.9)])
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         analysis.scrubbing_analysis([qc, qc], [ts], np.arange(3))
+
+
+def test_scrubbing_analysis_logs_clipped_edge_count(caplog):
+    """Near-perfect edges are clipped before Fisher z, and the count is logged."""
+    rng = np.random.RandomState(3)
+    n_tps = 40
+    base = rng.normal(size=n_tps)
+    # ROIs 0 and 1 are near-identical (r > 0.999); ROI 2 is independent.
+    ts = np.vstack([base, base + 1e-6 * rng.normal(size=n_tps), rng.normal(size=n_tps)])
+    qc = np.concatenate([np.full(20, 0.1), np.full(20, 0.9)])  # 50% kept -> included
+
+    with caplog.at_level("INFO", logger="analysis"):
+        analysis.scrubbing_analysis([qc], [ts], np.arange(3), qc_thresh=0.2, perm=False)
+
+    clip_messages = [r.message for r in caplog.records if "clipped" in r.message]
+    assert clip_messages
+    # The single near-perfect edge is clipped in both the full and scrubbed correlations.
+    assert "clipped 1 full and 1 scrubbed" in clip_messages[0]
 
 
 def test_scrubbing_analysis_rejects_time_by_roi_input():

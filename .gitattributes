@@ -1,0 +1,13 @@
+# Normalize line endings: store text as LF in the repo and check out LF on
+# every platform. Prevents CRLF churn from Windows/WSL checkouts.
+* text=auto eol=lf
+
+# Windows batch files require CRLF to run.
+*.bat text eol=crlf
+
+# Binary assets — never normalize or diff as text.
+*.png binary
+*.jpg binary
+*.gz binary
+*.npz binary
+*.ipynb binary

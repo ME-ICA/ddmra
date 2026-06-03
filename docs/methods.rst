@@ -148,13 +148,27 @@ Interpretation:
 - QC-FC is not a measure of neural signal preservation. It should be interpreted
   with data-loss and reliability or validity benchmarks when available.
 
+``ddmra`` also writes two descriptive QC-FC benchmark summaries to
+``qcrsfc_summary.tsv``: the median absolute QC-FC correlation and the percentage
+of edges with a significant QC-FC correlation (two-sided, uncorrected, at
+``alpha = 0.05``). These are the standard scalar QC-FC summaries reported in the
+denoising literature (Ciric et al., 2017; Parkes et al., 2018). Lower values
+indicate less residual association between run quality and connectivity, and
+under a pipeline with no residual QC-FC the percentage of significant edges
+should approach ``100 * alpha``. These summaries are descriptive diagnostics;
+inference in ``ddmra`` is based on the smoothing-curve intercept and slope.
+
 
 High-low QC analysis
 --------------------
 
-The high-low analysis splits retained runs by median mean QC. For each edge, it
-subtracts the mean connectivity of the low-QC group from the mean connectivity
-of the high-QC group.
+The high-low analysis splits retained runs into high-QC and low-QC groups by
+mean QC. For each edge, it subtracts the mean connectivity of the low-QC group
+from the mean connectivity of the high-QC group. The split is controlled by the
+``highlow_cut`` fraction: ``0.5`` (default) is a median split that uses every
+run, while smaller values (for example ``0.25`` for the top and bottom quartiles)
+contrast the QC extremes and drop the middle runs. Extreme-group contrasts are
+more sensitive to motion effects but use fewer runs.
 
 Interpretation:
 
@@ -162,7 +176,7 @@ Interpretation:
   runs.
 - The analysis is intentionally simple and is useful as a complementary
   artifact benchmark.
-- Because it depends on a median split, it should not be treated as a substitute
+- Because it depends on a group split, it should not be treated as a substitute
   for covariate-adjusted QC-FC when continuous QC information and covariates are
   important.
 
@@ -181,6 +195,12 @@ of the volumes remain.
 This convention differs from the original Power et al. implementation, but it
 keeps the direction of larger positive DDMRA effects similar across the
 implemented analyses.
+
+Because the scrubbing analysis Fisher-z-transforms raw connectivity, near-perfect
+short-distance edge correlations are clipped to ``+/-0.999`` before the transform to
+keep the Fisher-z values finite. The number of clipped full and scrubbed edge
+correlations is reported in the run log so that any compression of the most extreme
+edges is visible.
 
 Interpretation:
 
@@ -234,6 +254,11 @@ Output files from ``run_analyses``
     Diagnostic edgewise ranks of observed values against edgewise null values.
     These ranks are not p-values and should not be interpreted as inferential
     evidence.
+
+``qcrsfc_summary.tsv``
+    Descriptive QC-FC benchmark summaries (median absolute QC-FC correlation and
+    percentage of significant edges), written only when the ``qcrsfc`` analysis is
+    requested.
 
 ``run_denoising_summary.tsv``
     Run-level accounting for input volumes, QC thresholding, confound counts,
@@ -374,6 +399,10 @@ Practical guidance
   pipeline.
 - Treat data-loss and temporal degrees-of-freedom differences as part of the
   denoising result, not as incidental bookkeeping.
+- Use a sufficiently large sample. QC-FC and high-low estimates are unstable
+  in small samples, so ``ddmra`` warns when fewer than 30 runs are retained for
+  these analyses and refuses to run with fewer than 10 (Parkes et al., 2018;
+  Ciric et al., 2017).
 - Use enough permutations for the inferential claim. With 10000 permutations,
   the minimum p-value is approximately 0.0001.
 - Correct for multiple comparisons when making claims across many pipeline

@@ -9,6 +9,7 @@ small synthetic atlas (patched in to avoid any network access) and synthetic
 import os.path as op
 import re
 import types
+import warnings
 
 import nibabel as nib
 import numpy as np
@@ -25,13 +26,13 @@ from ddmra import workflows
 
 def test_run_analyses_requires_at_least_one_analysis(tmp_path):
     """An empty ``analyses`` tuple is rejected before any heavy work."""
-    with pytest.raises(AssertionError, match="At least one analysis"):
+    with pytest.raises(ValueError, match="At least one analysis"):
         workflows.run_analyses(["a"], [np.zeros(5)], out_dir=str(tmp_path), analyses=())
 
 
 def test_run_analyses_rejects_unknown_analysis(tmp_path):
     """Unknown analysis names are rejected."""
-    with pytest.raises(AssertionError, match="must be a tuple"):
+    with pytest.raises(ValueError, match="must be a tuple"):
         workflows.run_analyses(["a"], [np.zeros(5)], out_dir=str(tmp_path), analyses=("bogus",))
 
 
@@ -45,7 +46,7 @@ def test_run_analyses_requires_both_outlier_thresholds(tmp_path):
 
 def test_run_analyses_pca_threshold_out_of_range(tmp_path):
     """A float pca_threshold must be between 0 and 1."""
-    with pytest.raises(AssertionError, match="between 0 and 1"):
+    with pytest.raises(ValueError, match="between 0 and 1"):
         workflows.run_analyses(
             ["a"],
             [np.zeros(5)],
@@ -69,7 +70,7 @@ def test_run_analyses_bad_threshold_types(tmp_path):
 
 def test_run_analyses_qc_length_mismatch(tmp_path):
     """The number of QC arrays must match the number of files."""
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError, match="2 files were provided"):
         workflows.run_analyses(["a", "b"], [np.zeros(5)], out_dir=str(tmp_path))
 
 
@@ -331,6 +332,18 @@ def test_count_confounds_supports_1d_and_rejects_bad_inputs():
         workflows._count_confounds([np.zeros((2, 2, 2))], n_subjects=1)
 
 
+def test_nifti_stem_preserves_internal_periods():
+    """NIfTI extensions are stripped without truncating names that contain periods."""
+    assert workflows._nifti_stem("sub-01_bold.nii.gz") == "sub-01_bold"
+    assert workflows._nifti_stem("sub-01_bold.nii") == "sub-01_bold"
+    # Internal periods (e.g., a smoothing kernel of 5.0 mm) must survive.
+    assert workflows._nifti_stem("/data/sub-02_desc-sm5.0_bold.nii.gz") == "sub-02_desc-sm5.0_bold"
+    # Extension matching is case-insensitive.
+    assert workflows._nifti_stem("SUB-03_BOLD.NII.GZ") == "SUB-03_BOLD"
+    # Non-NIfTI inputs fall back to dropping only the final extension.
+    assert workflows._nifti_stem("notes.v2.txt") == "notes.v2"
+
+
 def test_prepare_run_denoising_metrics_rejects_invalid_tables():
     """Optional denoising metrics must be complete numeric run-level tables."""
     with pytest.raises(TypeError, match="DataFrame"):
@@ -546,6 +559,7 @@ def test_run_analyses_end_to_end(tmp_path, monkeypatch):
         "smoothing_curves.tsv.gz",
         "null_smoothing_curves.npz",
         "ranks.tsv.gz",
+        "qcrsfc_summary.tsv",
         "run_denoising_summary.tsv",
         "analysis_results.png",
         "log.tsv",
@@ -560,6 +574,124 @@ def test_run_analyses_end_to_end(tmp_path, monkeypatch):
     logged_ps = [float(p) for p in re.findall(r"p = ([0-9.]+)", log_text)]
     assert logged_ps
     assert all(0 <= p <= 1 for p in logged_ps)
+
+
+@pytest.mark.integration
+def test_run_analyses_warns_for_small_cross_run_sample(tmp_path, monkeypatch):
+    """QC-FC/high-low analyses warn (but proceed) when the sample is small."""
+    monkeypatch.setattr(
+        workflows.datasets, "fetch_coords_power_2011", lambda *a, **k: _fake_power_atlas()
+    )
+
+    out_dir = tmp_path / "out"
+    # 12 runs is above the hard MIN_SUBJECTS floor but below the QC-FC stability N.
+    files, qc = _write_synthetic_images(tmp_path, n_subjects=12)
+    assert workflows.MIN_SUBJECTS <= 12 < workflows.QCFC_STABILITY_N
+
+    with pytest.warns(UserWarning, match="unstable"):
+        workflows.run_analyses(
+            files,
+            qc,
+            out_dir=str(out_dir),
+            n_iters=2,
+            n_jobs=1,
+            window=_WINDOW,
+            analyses=("qcrsfc", "highlow"),
+        )
+
+    # The caveat is also recorded in the run log.
+    assert "unstable" in (out_dir / "log.tsv").read_text()
+
+
+@pytest.mark.integration
+def test_run_analyses_scrubbing_only_skips_stability_warning(tmp_path, monkeypatch):
+    """The small-sample QC-FC caveat does not apply to the within-run scrubbing analysis."""
+    monkeypatch.setattr(
+        workflows.datasets, "fetch_coords_power_2011", lambda *a, **k: _fake_power_atlas()
+    )
+
+    out_dir = tmp_path / "out"
+    files, qc = _write_synthetic_images(tmp_path, n_subjects=12)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        workflows.run_analyses(
+            files,
+            qc,
+            out_dir=str(out_dir),
+            n_iters=2,
+            n_jobs=1,
+            window=_WINDOW,
+            analyses=("scrubbing",),
+        )
+
+    assert not any("unstable" in str(w.message) for w in caught)
+    # The QC-FC summary is only written when the qcrsfc analysis is requested.
+    assert not (out_dir / "qcrsfc_summary.tsv").exists()
+
+
+@pytest.mark.integration
+def test_run_analyses_writes_qcrsfc_summary(tmp_path, monkeypatch):
+    """The qcrsfc analysis writes the descriptive QC-FC benchmark summary file."""
+    monkeypatch.setattr(
+        workflows.datasets, "fetch_coords_power_2011", lambda *a, **k: _fake_power_atlas()
+    )
+
+    out_dir = tmp_path / "out"
+    files, qc = _write_synthetic_images(tmp_path)
+    workflows.run_analyses(
+        files,
+        qc,
+        out_dir=str(out_dir),
+        n_iters=2,
+        n_jobs=1,
+        window=_WINDOW,
+        analyses=("qcrsfc",),
+    )
+
+    summary = pd.read_table(out_dir / "qcrsfc_summary.tsv")
+    assert summary.shape[0] == 1
+    expected_columns = {
+        "n_runs",
+        "n_covariates",
+        "n_edges",
+        "median_abs_qcfc",
+        "mean_abs_qcfc",
+        "n_significant_edges",
+        "percent_significant_edges",
+        "alpha",
+    }
+    assert expected_columns.issubset(summary.columns)
+    row = summary.iloc[0]
+    assert 0 <= row["median_abs_qcfc"] <= 1
+    assert 0 <= row["percent_significant_edges"] <= 100
+
+
+@pytest.mark.integration
+def test_run_analyses_highlow_cut_changes_result(tmp_path, monkeypatch):
+    """The high-low split fraction propagates through the workflow and changes the result."""
+    monkeypatch.setattr(
+        workflows.datasets, "fetch_coords_power_2011", lambda *a, **k: _fake_power_atlas()
+    )
+    files, qc = _write_synthetic_images(tmp_path)
+
+    median_dir = tmp_path / "median"
+    quartile_dir = tmp_path / "quartile"
+    for out_dir, cut in ((median_dir, 0.5), (quartile_dir, 0.25)):
+        workflows.run_analyses(
+            files,
+            qc,
+            out_dir=str(out_dir),
+            n_iters=2,
+            n_jobs=1,
+            window=_WINDOW,
+            analyses=("highlow",),
+            highlow_cut=cut,
+        )
+
+    median_vals = pd.read_table(median_dir / "analysis_values.tsv.gz")["highlow"]
+    quartile_vals = pd.read_table(quartile_dir / "analysis_values.tsv.gz")["highlow"]
+    assert not np.allclose(median_vals, quartile_vals)
 
 
 @pytest.mark.integration

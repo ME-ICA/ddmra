@@ -3,6 +3,7 @@
 import logging
 import os.path as op
 import re
+import warnings
 from itertools import combinations
 from os import PathLike, makedirs
 
@@ -21,6 +22,12 @@ LGR = logging.getLogger("workflows")
 ALLOWED_ANALYSES = ("qcrsfc", "highlow", "scrubbing")
 COMPARISON_INTERCEPT_DISTANCE = 35
 COMPARISON_SLOPE_DISTANCE = 100
+# Minimum number of runs required to attempt analysis.
+MIN_SUBJECTS = 10
+# QC-FC estimates are unstable in small samples. Parkes et al. (2018) and Ciric
+# et al. (2017) show sampling variability dominates below roughly 30 runs, so warn
+# (but do not error) when the retained sample is in the MIN_SUBJECTS-to-this range.
+QCFC_STABILITY_N = 30
 
 
 def _reset_workflow_log_handler():
@@ -45,11 +52,13 @@ def _masker_kwargs():
 
 def _validate_analyses(analyses):
     """Validate and return requested DDMRA analyses."""
-    assert len(analyses) > 0, "At least one analysis must be selected."
-    assert all([a in ALLOWED_ANALYSES for a in analyses]), (
-        "Parameter 'analyses' must be a tuple of one or more of the following values: "
-        f"{', '.join(ALLOWED_ANALYSES)}"
-    )
+    if len(analyses) == 0:
+        raise ValueError("At least one analysis must be selected.")
+    if not all(a in ALLOWED_ANALYSES for a in analyses):
+        raise ValueError(
+            "Parameter 'analyses' must be a tuple of one or more of the following values: "
+            f"{', '.join(ALLOWED_ANALYSES)}"
+        )
     return tuple(analyses)
 
 
@@ -295,6 +304,17 @@ def _is_nifti_path(path):
     return not path.endswith(cifti_suffixes) and path.endswith((".nii", ".nii.gz"))
 
 
+def _nifti_stem(path):
+    """Return a filename without its NIfTI extension, preserving internal periods."""
+    name = op.basename(str(path))
+    lower = name.lower()
+    for ext in (".nii.gz", ".nii"):
+        if lower.endswith(ext):
+            return name[: -len(ext)]
+    # Fall back to dropping only the final extension for non-NIfTI inputs.
+    return op.splitext(name)[0]
+
+
 def _load_pipeline_file_table(pipeline_file_table):
     """Load a run-by-pipeline file table from a DataFrame or TSV path."""
     if isinstance(pipeline_file_table, pd.DataFrame):
@@ -432,6 +452,7 @@ def _compute_pipeline_analysis_values(
     edge_sorting_idx,
     qc_thresh,
     run_covariates=None,
+    highlow_cut=0.5,
 ):
     """Compute one DDMRA analysis for one pipeline on an already-paired run set."""
     if analysis_name == "qcrsfc":
@@ -441,7 +462,7 @@ def _compute_pipeline_analysis_values(
             run_covariates=run_covariates,
         )
     if analysis_name == "highlow":
-        return analysis.highlow_analysis(mean_qc, pipeline_data["z_corr_mats"])
+        return analysis.highlow_analysis(mean_qc, pipeline_data["z_corr_mats"], cut=highlow_cut)
     if analysis_name == "scrubbing":
         return analysis.scrubbing_analysis(
             qc,
@@ -464,6 +485,7 @@ def _compute_pipeline_analysis_curves(
     distances,
     smoothing_curve_distances,
     run_covariates=None,
+    highlow_cut=0.5,
 ):
     """Compute smoothing curves for all requested analyses for one pipeline."""
     curves = {}
@@ -476,6 +498,7 @@ def _compute_pipeline_analysis_curves(
             edge_sorting_idx,
             qc_thresh,
             run_covariates=run_covariates,
+            highlow_cut=highlow_cut,
         )
         curves[analysis_name] = utils.calculate_smoothing_curve(
             values,
@@ -539,6 +562,7 @@ def _pipeline_pairwise_null_iter(
     distances,
     smoothing_curve_distances,
     run_covariates=None,
+    highlow_cut=0.5,
 ):
     """One paired within-run pipeline-label swap permutation."""
     rng = np.random.RandomState(seed=seed)
@@ -556,6 +580,7 @@ def _pipeline_pairwise_null_iter(
         distances,
         smoothing_curve_distances,
         run_covariates=run_covariates,
+        highlow_cut=highlow_cut,
     )
     second_curves = _compute_pipeline_analysis_curves(
         analyses,
@@ -568,6 +593,7 @@ def _pipeline_pairwise_null_iter(
         distances,
         smoothing_curve_distances,
         run_covariates=run_covariates,
+        highlow_cut=highlow_cut,
     )
 
     null_values = np.zeros((len(analyses), 2))
@@ -612,6 +638,7 @@ def _run_pipeline_pairwise_comparisons(
     atlas,
     sphere_radius,
     run_covariates,
+    highlow_cut=0.5,
 ):
     """Perform direct paired statistical comparisons between processing pipelines."""
     n_runs = file_table.shape[0]
@@ -677,6 +704,7 @@ def _run_pipeline_pairwise_comparisons(
             distances,
             smoothing_curve_distances,
             run_covariates=pair_run_covariates,
+            highlow_cut=highlow_cut,
         )
         second_curves = _compute_pipeline_analysis_curves(
             analyses,
@@ -689,6 +717,7 @@ def _run_pipeline_pairwise_comparisons(
             distances,
             smoothing_curve_distances,
             run_covariates=pair_run_covariates,
+            highlow_cut=highlow_cut,
         )
 
         with utils.tqdm_joblib(
@@ -711,6 +740,7 @@ def _run_pipeline_pairwise_comparisons(
                     distances,
                     smoothing_curve_distances,
                     run_covariates=pair_run_covariates,
+                    highlow_cut=highlow_cut,
                 )
                 for seed in range(n_iters)
             )
@@ -915,6 +945,7 @@ def run_pipeline_comparison(
             run_analyses_kwargs.get("atlas", "power_2011"),
             run_analyses_kwargs.get("sphere_radius", 5.0),
             run_analyses_kwargs.get("run_covariates", None),
+            run_analyses_kwargs.get("highlow_cut", 0.5),
         )
 
     return pipeline_outputs
@@ -937,6 +968,7 @@ def run_analyses(
     sphere_radius=5.0,
     run_covariates=None,
     run_denoising_metrics=None,
+    highlow_cut=0.5,
 ):
     """Run scrubbing, high-low motion, and QCRSFC analyses.
 
@@ -995,9 +1027,21 @@ def run_analyses(
         columns must be numeric. Useful columns include upstream retained-volume counts,
         censored-volume counts, or temporal degrees of freedom after denoising.
         Default is None.
+    highlow_cut : float, optional
+        Fraction of runs assigned to each extreme QC group in the high-low analysis, in
+        ``(0, 0.5]``. ``0.5`` (default) is a median split; smaller values (e.g., ``0.25``
+        for top vs bottom quartiles) contrast the QC extremes and drop the middle runs.
+        See :func:`ddmra.analysis.highlow_analysis`.
 
     Notes
     -----
+    At least ``MIN_SUBJECTS`` (10) runs must be retained for analysis, or a
+    :class:`ValueError` is raised. When the QC:RSFC or high-low analyses are requested and
+    fewer than ``QCFC_STABILITY_N`` (30) runs are retained, a :class:`UserWarning` is issued
+    because QC-FC estimates are unstable in small samples (Parkes et al., 2018; Ciric et al.,
+    2017); the analyses still run, but their intercept and slope summaries should be
+    interpreted with caution.
+
     This function writes out several files to out_dir:
     - ``analysis_values.tsv.gz``: Raw analysis values for analyses.
         Has four columns: distance, qcrsfc, scrubbing, and highlow.
@@ -1011,6 +1055,11 @@ def run_analyses(
         The three arrays' keys are 'qcrsfc', 'highlow', and 'scrubbing'.
     - ``ranks.tsv.gz``: Diagnostic edgewise ranks of the observed analysis values against
         the edgewise null distributions. These ranks are not inferential p-values.
+    - ``qcrsfc_summary.tsv`` (only when the ``qcrsfc`` analysis is requested):
+        Descriptive QC-FC benchmark summaries, including the median absolute QC-FC
+        correlation and the percentage of edges with a significant QC-FC correlation
+        (Ciric et al., 2017; Parkes et al., 2018). These are diagnostics, not the
+        package's inferential result.
     - ``run_denoising_summary.tsv``: Run-level volume, confound-regressor, retention,
         and optional user-provided tDOF/data-loss accounting.
     - ``[analysis]_analysis.png``: Figure for each analysis.
@@ -1030,7 +1079,8 @@ def run_analyses(
     elif isinstance(pca_threshold, int) and isinstance(outlier_threshold, float):
         LGR.info(f"Performing outlier detection on first {pca_threshold} PCA components.")
     elif isinstance(pca_threshold, float) and isinstance(outlier_threshold, float):
-        assert 0 < pca_threshold < 1, "Threshold must be between 0 and 1."
+        if not 0 < pca_threshold < 1:
+            raise ValueError("Threshold must be between 0 and 1.")
         LGR.info(
             "Performing outlier detection on PCA components explaining "
             f"{pca_threshold * 100}% of the variance."
@@ -1055,7 +1105,8 @@ def run_analyses(
 
     LGR.info("Preallocating matrices")
     n_subjects = len(files)
-    assert len(qc) == n_subjects, f"{len(qc)} != {n_subjects}"
+    if len(qc) != n_subjects:
+        raise ValueError(f"qc has {len(qc)} runs, but {n_subjects} files were provided.")
     qc = _validate_qc_inputs(qc)
     if run_covariates is not None and "qcrsfc" not in analyses:
         LGR.info("Ignoring run_covariates because QC:RSFC analysis was not requested.")
@@ -1108,7 +1159,10 @@ def run_analyses(
         else:
             raw_ts = atlas_masker.fit_transform(files[i_subj]).T
 
-        assert raw_ts.shape[0] == n_rois, f"{raw_ts.shape[0]} != {n_rois}"
+        if raw_ts.shape[0] != n_rois:
+            raise ValueError(
+                f"{files[i_subj]} produced {raw_ts.shape[0]} ROIs, but {n_rois} are expected."
+            )
 
         if np.any(np.isnan(raw_ts)):
             LGR.warning(f"Time series of {files[i_subj]} contains NaNs. Dropping from analysis.")
@@ -1158,8 +1212,7 @@ def run_analyses(
         if run_covariates is not None:
             run_covariates = run_covariates[good_subjects, :]
 
-        # Assumes no periods in the filename except for the extension
-        file_names = [op.basename(files[i]).split(".")[0] for i in good_subjects]
+        file_names = [_nifti_stem(files[i]) for i in good_subjects]
 
     # Time to do some outlier detection
     if pca_threshold is not None:
@@ -1241,8 +1294,21 @@ def run_analyses(
         del corrs_df, mean_qc_df, file_names
 
     LGR.info(f"Retaining {n_subjects_remaining}/{n_subjects} subjects for analysis.")
-    if n_subjects_remaining < 10:
+    if n_subjects_remaining < MIN_SUBJECTS:
         raise ValueError("Too few subjects remaining for analysis.")
+
+    # QC-FC and high-low are cross-run associations whose estimates are unstable in
+    # small samples. Warn (but proceed) so users can interpret marginal-N results with care.
+    cross_run_analyses = ("qcrsfc" in analyses) or ("highlow" in analyses)
+    if cross_run_analyses and n_subjects_remaining < QCFC_STABILITY_N:
+        stability_msg = (
+            f"Only {n_subjects_remaining} runs were retained for analysis. QC-FC and "
+            f"high-low estimates are unstable below ~{QCFC_STABILITY_N} runs (Parkes et al., "
+            "2018; Ciric et al., 2017); interpret intercept and slope summaries with caution "
+            "and prefer larger samples."
+        )
+        LGR.warning(stability_msg)
+        warnings.warn(stability_msg, UserWarning, stacklevel=2)
 
     analysis_values = pd.DataFrame(columns=analyses, index=distances, dtype=float)
     analysis_values.index.name = "distance"
@@ -1273,10 +1339,29 @@ def run_analyses(
         smoothing_curves.loc[smoothing_curve_distances, "qcrsfc"] = qcrsfc_smoothing_curve
         del qcrsfc_smoothing_curve
 
+        # Descriptive QC-FC benchmark summaries (Ciric et al., 2017; Parkes et al., 2018).
+        qcrsfc_summary_metrics = analysis.qcrsfc_summary(
+            mean_qc, z_corr_mats, run_covariates=run_covariates
+        )
+        pd.DataFrame([qcrsfc_summary_metrics]).to_csv(
+            op.join(out_dir, "qcrsfc_summary.tsv"),
+            sep="\t",
+            lineterminator="\n",
+            index=False,
+        )
+        LGR.info(
+            f"QC:RSFC summary: median |QC-FC| r = "
+            f"{qcrsfc_summary_metrics['median_abs_qcfc']:.04f}; "
+            f"{qcrsfc_summary_metrics['percent_significant_edges']:.02f}% of edges "
+            f"significant at p < {qcrsfc_summary_metrics['alpha']} (uncorrected)."
+        )
+
     if "highlow" in analyses:
         # High-low motion analysis
         LGR.info("Performing high-low motion analysis")
-        analysis_values["highlow"] = analysis.highlow_analysis(mean_qc, z_corr_mats)
+        analysis_values["highlow"] = analysis.highlow_analysis(
+            mean_qc, z_corr_mats, cut=highlow_cut
+        )
         hl_smoothing_curve = utils.moving_average(analysis_values["highlow"], window)
         hl_smoothing_curve, hl_smoothing_curve_distances = utils.average_across_distances(
             hl_smoothing_curve,
@@ -1330,6 +1415,7 @@ def run_analyses(
             mean_qc,
             z_corr_mats,
             run_covariates=run_covariates,
+            highlow_cut=highlow_cut,
             n_iters=n_iters,
             n_jobs=n_jobs,
         )

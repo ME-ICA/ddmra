@@ -112,8 +112,8 @@ def test_moving_average():
 
 
 def test_moving_average_odd_window_raises():
-    """An odd window size is not supported and should assert."""
-    with pytest.raises(AssertionError):
+    """An odd window size is not supported and should raise."""
+    with pytest.raises(ValueError, match="divisible by 2"):
         utils.moving_average(np.arange(10.0), window=3)
 
 
@@ -239,6 +239,19 @@ def test_r2z():
     assert math.isclose(utils.r2z(np.array([-1.0]))[0], np.arctanh(-0.999))
     # r=2 (out of range) is clipped to the same value as r=1.
     assert utils.r2z(np.array([2.0]))[0] == utils.r2z(np.array([1.0]))[0]
+
+
+def test_r2z_reports_clipped_count():
+    """r2z can report how many values were clipped before transforming."""
+    r = np.array([0.1, 0.9999, -1.0, 0.5, 0.999])
+    z, n_clipped = utils.r2z(r, return_n_clipped=True)
+    # 0.9999 and -1.0 exceed the 0.999 limit; exactly-0.999 is not clipped.
+    assert n_clipped == 2
+    assert z.shape == r.shape
+    # A custom, looser clip changes both the count and the transformed values.
+    z_loose, n_loose = utils.r2z(r, clip=0.95, return_n_clipped=True)
+    assert n_loose == 3
+    assert math.isclose(z_loose[1], np.arctanh(0.95))
 
 
 def test_get_rank():

@@ -46,6 +46,7 @@ API
    ddmra.analysis.scrubbing_analysis
    ddmra.analysis.highlow_analysis
    ddmra.analysis.qcrsfc_analysis
+   ddmra.analysis.qcrsfc_summary
 
 
 .. _api_plotting_ref:

@@ -62,10 +62,23 @@ def plot_analysis(
     ax : matplotlib.pyplot.Axes
         Updated Axes object.
     """
-    assert data_points.ndim == distances.ndim == smoothing_curve.ndim == curve_distances.ndim == 1
-    assert null_smoothing_curves.ndim == 2
-    assert data_points.shape == distances.shape
-    assert smoothing_curve.shape[0] == curve_distances.shape[0] == null_smoothing_curves.shape[1]
+    if not (
+        data_points.ndim == distances.ndim == smoothing_curve.ndim == curve_distances.ndim == 1
+    ):
+        raise ValueError(
+            "data_points, distances, smoothing_curve, and curve_distances must all be 1D."
+        )
+    if null_smoothing_curves.ndim != 2:
+        raise ValueError("null_smoothing_curves must be a 2D array.")
+    if data_points.shape != distances.shape:
+        raise ValueError("data_points and distances must have the same shape.")
+    if not (
+        smoothing_curve.shape[0] == curve_distances.shape[0] == null_smoothing_curves.shape[1]
+    ):
+        raise ValueError(
+            "smoothing_curve, curve_distances, and null_smoothing_curves must describe the "
+            "same number of distance bins."
+        )
 
     if not ax:
         fig, ax = plt.subplots(figsize=(16, 10))
